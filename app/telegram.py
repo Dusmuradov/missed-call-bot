@@ -41,9 +41,11 @@ def get_dispatcher() -> Dispatcher:
     if _dp is None:
         from app.bot.admin import router as admin_router
         from app.bot.handlers import router
+        from app.bot.hermes_handlers import router as hermes_router
         _dp = Dispatcher(storage=MemoryStorage())
-        _dp.include_router(admin_router)  # admin раньше — приоритет на approve:/reject:
+        _dp.include_router(admin_router)   # admin раньше — приоритет на approve:/reject:
         _dp.include_router(router)
+        _dp.include_router(hermes_router)  # hermes последним — free-form F.text
     return _dp
 
 

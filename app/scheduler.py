@@ -167,6 +167,40 @@ async def daily_report_job() -> None:
     logger.info("Daily report sent.")
 
 
+async def hermes_morning_digest_job() -> None:
+    """Отправляет персональный дайджест каждому менеджеру с amocrm_user_id."""
+    if not settings.deepseek_api_key:
+        logger.debug("Hermes digest skipped: DEEPSEEK_API_KEY not set.")
+        return
+
+    try:
+        from app.db import get_session
+        from app.repository import list_bot_users
+        from app.telegram import send_to_user
+        from hermes.audit import run_audit
+        from hermes.digest import format_digest
+
+        async with get_session() as session:
+            all_users = await list_bot_users(session)
+
+        targets = [u for u in all_users if u.amocrm_user_id and u.role in ("seller", "manager")]
+        logger.info("Hermes digest: sending to %d users", len(targets))
+
+        for user in targets:
+            try:
+                deals = await run_audit(user.amocrm_user_id, user.tg_user_id, with_suggestions=False)
+                if not deals:
+                    continue
+                name = user.full_name or user.username or "Менеджер"
+                text = format_digest(name, deals, top_n=5)
+                await send_to_user(user.tg_user_id, text)
+            except Exception as exc:
+                logger.exception("Hermes digest failed for user=%d: %s", user.tg_user_id, exc)
+
+    except Exception as exc:
+        logger.exception("Hermes morning digest job failed: %s", exc)
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Создаёт и настраивает планировщик."""
     global _scheduler
@@ -198,6 +232,15 @@ def create_scheduler() -> AsyncIOScheduler:
         minutes=30,
         id="amocrm_token_refresh",
         name="AmoCRM token refresh",
+        replace_existing=True,
+    )
+
+    # Hermes: персональный дайджест менеджерам каждый день в hermes_digest_hour
+    _scheduler.add_job(
+        hermes_morning_digest_job,
+        trigger=CronTrigger(hour=settings.hermes_digest_hour, minute=0, timezone=settings.timezone),
+        id="hermes_morning_digest",
+        name="Hermes morning digest",
         replace_existing=True,
     )
 

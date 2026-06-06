@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # Если пустой — используется первый статус из API /leads/pipelines.
     amocrm_initial_status_id: int = 0
 
+    # --- Hermes AI Agent ---
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    hermes_digest_hour: int = 9       # час отправки утреннего дайджеста (локальный timezone)
+    hermes_audit_ttl_hours: int = 4   # TTL кэша аудита в часах
+
     def utel_to_amocrm(self) -> dict[str, int]:
         """Возвращает маппинг utel_ext → amocrm_user_id из UTEL_AMOCRM_MAP."""
         if not self.utel_amocrm_map.strip():

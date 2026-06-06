@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -110,3 +110,37 @@ class AmocrmToken(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class HermesConversation(Base):
+    __tablename__ = "hermes_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tg_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # "user" или "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class HermesAuditCache(Base):
+    __tablename__ = "hermes_audit_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    amocrm_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    lead_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    heat: Mapped[str] = mapped_column(String(8), nullable=False)  # "hot"|"warm"|"cold"
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+_hermes_audit_idx = Index(
+    "ix_hermes_audit_user_lead",
+    HermesAuditCache.amocrm_user_id,
+    HermesAuditCache.lead_id,
+)
