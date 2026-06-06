@@ -165,4 +165,14 @@ def users_list_keyboard(users) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def user_confirm_remove_keyboard(uid: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления пользователя."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"users:confirm_remove:{uid}"),
+            InlineKeyboardButton(text="← Назад",        callback_data="menu:users"),
+        ],
+    ])
+
+
 MAIN_MENU_TEXT = "📊 <b>Аналитика</b>\n\nВыберите раздел:"

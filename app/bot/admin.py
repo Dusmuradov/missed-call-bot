@@ -14,6 +14,7 @@ from app.bot.menu import (
     approval_keyboard,
     seller_amo_picker,
     seller_ext_picker,
+    user_confirm_remove_keyboard,
     users_list_keyboard,
 )
 
@@ -66,11 +67,73 @@ async def cb_menu_users(cq: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Удаление пользователя
+# Просмотр / удаление пользователя
 # ---------------------------------------------------------------------------
+
+@router.callback_query(F.data.startswith("users:info:"))
+async def cb_users_info(cq: CallbackQuery) -> None:
+    if not await _is_admin(cq.from_user.id):
+        await _deny_admin(cq)
+        return
+
+    uid = int(cq.data.split(":")[-1])
+    from app.db import get_session
+    from app.repository import get_bot_user
+    async with get_session() as session:
+        user = await get_bot_user(session, uid)
+
+    if user is None:
+        await cq.answer("Пользователь не найден.", show_alert=True)
+        return
+
+    role_label = ROLE_LABELS.get(user.role, user.role)
+    name = user.full_name or user.username or str(uid)
+    uname = f"@{user.username}" if user.username else "—"
+    utel = user.utel_ext or "—"
+    amo = str(user.amocrm_user_id) if user.amocrm_user_id else "—"
+
+    await cq.message.edit_text(
+        f"👤 <b>{name}</b>\n\n"
+        f"Роль: {role_label}\n"
+        f"Username: {uname}\n"
+        f"Telegram ID: <code>{uid}</code>\n"
+        f"Utel: <code>{utel}</code>\n"
+        f"AmoCRM ID: <code>{amo}</code>",
+        reply_markup=user_confirm_remove_keyboard(uid),
+    )
+    await cq.answer()
+
 
 @router.callback_query(F.data.startswith("users:remove:"))
 async def cb_users_remove(cq: CallbackQuery) -> None:
+    if not await _is_admin(cq.from_user.id):
+        await _deny_admin(cq)
+        return
+
+    uid = int(cq.data.split(":")[-1])
+    from app.db import get_session
+    from app.repository import get_bot_user
+    async with get_session() as session:
+        user = await get_bot_user(session, uid)
+
+    if user is None:
+        await cq.answer("Пользователь не найден.", show_alert=True)
+        return
+
+    name = user.full_name or user.username or str(uid)
+    role_label = ROLE_LABELS.get(user.role, user.role)
+
+    await cq.message.edit_text(
+        f"🗑 <b>Удалить пользователя?</b>\n\n"
+        f"{role_label}: {name}\n"
+        f"Telegram ID: <code>{uid}</code>",
+        reply_markup=user_confirm_remove_keyboard(uid),
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("users:confirm_remove:"))
+async def cb_users_confirm_remove(cq: CallbackQuery) -> None:
     if not await _is_admin(cq.from_user.id):
         await _deny_admin(cq)
         return
@@ -87,10 +150,8 @@ async def cb_users_remove(cq: CallbackQuery) -> None:
     else:
         await cq.answer("Пользователь не найден.")
 
-    await cq.message.edit_text(
-        f"👥 <b>Пользователи</b> ({len(users)} чел.)\n\nНажмите 🗑 для удаления:",
-        reply_markup=users_list_keyboard(users),
-    )
+    title = f"👥 <b>Пользователи</b> ({len(users)} чел.)\n\nНажмите 🗑 для удаления:"
+    await cq.message.edit_text(title, reply_markup=users_list_keyboard(users))
 
 
 # ---------------------------------------------------------------------------
