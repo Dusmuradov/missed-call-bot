@@ -76,6 +76,23 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/debug/db", tags=["meta"])
+async def debug_db() -> dict:
+    """Показывает тип БД и наличие токена AmoCRM (временный эндпоинт для диагностики)."""
+    import os
+    raw_url = os.environ.get("DATABASE_URL", "NOT SET")
+    db_type = "sqlite" if "sqlite" in raw_url else ("postgres" if "postgres" in raw_url else raw_url[:30])
+    from app.db import get_session
+    from app.repository import get_amocrm_token
+    try:
+        async with get_session() as session:
+            token = await get_amocrm_token(session)
+        token_info = {"exists": token is not None, "expires_at": str(token.expires_at) if token else None}
+    except Exception as exc:
+        token_info = {"error": str(exc)}
+    return {"database_url_set": raw_url != "NOT SET", "db_type": db_type, "amocrm_token": token_info}
+
+
 # ---------------------------------------------------------------------------
 # AmoCRM OAuth (первичная авторизация — одноразово)
 # ---------------------------------------------------------------------------
