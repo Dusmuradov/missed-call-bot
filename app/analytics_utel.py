@@ -27,6 +27,8 @@ class OperatorStats:
     call_count_for_avg: int = 0
     callbacks_done: int = 0      # перезвонили по пропущенным
     callbacks_total: int = 0     # всего пропущенных назначенных этому оператору
+    first_call_utc: Optional[datetime] = None   # время первого звонка (in или out)
+    last_call_utc: Optional[datetime] = None    # время последнего звонка
 
     @property
     def answer_rate(self) -> float:
@@ -147,6 +149,12 @@ async def get_period_stats(
         if call.wait_seconds:
             op.total_wait_seconds += call.wait_seconds
             op.call_count_for_avg += 1
+
+        if call.call_time_utc:
+            if op.first_call_utc is None or call.call_time_utc < op.first_call_utc:
+                op.first_call_utc = call.call_time_utc
+            if op.last_call_utc is None or call.call_time_utc > op.last_call_utc:
+                op.last_call_utc = call.call_time_utc
 
     stats.hourly = dict(hourly)
     stats.shift_incoming = shift_incoming

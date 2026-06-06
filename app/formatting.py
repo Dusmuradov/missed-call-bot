@@ -346,10 +346,25 @@ def format_daily_utel_report(
 
     ops = sorted(stats.operators.values(), key=lambda x: x.incoming, reverse=True)
     if ops:
+        try:
+            tz = ZoneInfo(timezone_str)
+        except ZoneInfoNotFoundError:
+            tz = ZoneInfo("UTC")
+
         for op in ops:
             cb = f"{op.callbacks_done}/{op.callbacks_total}" if op.callbacks_total > 0 else "—"
+
+            first_str = (
+                op.first_call_utc.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+                if op.first_call_utc else "—"
+            )
+            last_str = (
+                op.last_call_utc.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+                if op.last_call_utc else "—"
+            )
+
             lines.append(
-                f"  <b>{op.name}</b>\n"
+                f"  <b>{op.name}</b>  ({first_str} – {last_str})\n"
                 f"    Вх: {op.incoming} / Принято: {op.answered} ({op.answer_rate}%)"
                 f" / Пропущено: {op.missed}\n"
                 f"    Исх: {op.outgoing} / Перезвоны: {cb}"
