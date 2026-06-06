@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     amocrm_client_id: str = ""
     amocrm_client_secret: str = ""
     amocrm_redirect_uri: str = ""
+    # Долгосрочный токен (если задан — OAuth и refresh не нужны)
+    amocrm_long_lived_token: str = ""
     # Статус ID воронки, который считается «необработанным» (первый статус).
     # Если пустой — используется первый статус из API /leads/pipelines.
     amocrm_initial_status_id: int = 0

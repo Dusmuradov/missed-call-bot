@@ -69,8 +69,9 @@ async def check_callback_escalations() -> None:
 
 
 async def refresh_amocrm_token_job() -> None:
-    """Проактивно обновляет AmoCRM access_token если истекает через <2 часа."""
-    if not settings.amocrm_subdomain:
+    """Проактивно обновляет AmoCRM access_token если истекает через <2 часа.
+    Пропускается если задан AMOCRM_LONG_LIVED_TOKEN."""
+    if not settings.amocrm_subdomain or settings.amocrm_long_lived_token:
         return
 
     try:

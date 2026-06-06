@@ -96,6 +96,70 @@ class AmocrmClient:
                 break
             page += 1
 
+    async def get_active_leads(
+        self,
+        responsible_user_id: int,
+    ) -> AsyncIterator[dict]:
+        page = 1
+        while True:
+            params = {
+                "filter[responsible_user_id][]": responsible_user_id,
+                "with": "contacts",
+                "limit": _PAGE_SIZE,
+                "page": page,
+            }
+            try:
+                data = await self._get("/leads", params=params)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 204:
+                    break
+                raise
+
+            leads = data.get("_embedded", {}).get("leads", [])
+            if not leads:
+                break
+
+            for lead in leads:
+                if lead.get("status_id") in (142, 143):
+                    continue
+                yield lead
+
+            links = data.get("_links", {})
+            if "next" not in links:
+                break
+            page += 1
+
+    async def get_lead_notes(self, lead_id: int) -> list[dict]:
+        try:
+            data = await self._get(
+                f"/leads/{lead_id}/notes",
+                params={"limit": 50, "order[id]": "desc"},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return []
+            raise
+
+        return data.get("_embedded", {}).get("notes", [])
+
+    async def get_lead_tasks(self, lead_id: int) -> list[dict]:
+        try:
+            data = await self._get(
+                "/tasks",
+                params={
+                    "filter[entity_id]": lead_id,
+                    "filter[entity_type]": "leads",
+                    "filter[is_completed]": 0,
+                    "limit": 50,
+                },
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (404, 204):
+                return []
+            raise
+
+        return data.get("_embedded", {}).get("tasks", [])
+
 
 # ---------------------------------------------------------------------------
 # OAuth helpers (используются при первичной авторизации и refresh)
@@ -163,9 +227,12 @@ async def _notify_admin_token_failed(error: str) -> None:
 async def get_valid_client() -> Optional[AmocrmClient]:
     """
     Возвращает AmocrmClient с валидным токеном или None если токена нет.
-    Автоматически обновляет токен если он истекает через <30 минут или уже истёк.
-    Защищён asyncio.Lock — безопасно при параллельных вызовах.
+    Если задан AMOCRM_LONG_LIVED_TOKEN — использует его напрямую, без OAuth/refresh.
     """
+    # Долгосрочный токен из env — приоритет, никакого refresh не нужно
+    if settings.amocrm_long_lived_token:
+        return AmocrmClient(settings.amocrm_subdomain, settings.amocrm_long_lived_token)
+
     from app.db import get_session
     from app.repository import get_amocrm_token, upsert_amocrm_token
 
