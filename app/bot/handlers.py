@@ -19,6 +19,7 @@ from app.bot.menu import (
     compare_type_keyboard,
     main_menu_keyboard,
     period_keyboard,
+    role_select_keyboard,
 )
 from app.periods import COMPARE_FUNCS, COMPARE_LABELS, PERIOD_FUNCS, PERIOD_LABELS
 
@@ -68,16 +69,23 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     role = await _get_role(uid)
 
     if role is None:
-        await state.set_state(Registration.waiting_utel_code)
+        await state.clear()
         await message.answer(
             "👋 Добро пожаловать!\n\n"
-            "Введите ваш <b>код оператора Utel</b> (внутренний номер, например: <code>101</code>):"
+            "Выберите вашу роль:",
+            reply_markup=role_select_keyboard(),
         )
         return
 
     if role == "pending":
         await message.answer("⏳ Ваша заявка ещё на рассмотрении. Ожидайте.")
         return
+
+    if role == "rejected":
+        await message.answer("⛔ Доступ закрыт. Обратитесь к администратору.")
+        return
+
+    await message.answer(MAIN_MENU_TEXT, reply_markup=main_menu_keyboard(role))
 
 # ---------------------------------------------------------------------------
 # Шаг регистрации: ввод кода оператора Utel
@@ -128,18 +136,79 @@ async def reg_utel_code(message: Message, state: FSMContext) -> None:
             f"Имя: {message.from_user.full_name or '—'}\n"
             f"Username: {uname}\n"
             f"ID: <code>{uid}</code>\n"
+            f"Желаемая роль: 🛒 Сотрудник\n"
             f"Utel: <code>{utel_ext}</code>\n"
             f"{amo_info}\n\n"
             "Выберите роль:"
         )
         await send_to_user(settings.admin_user_id, text, reply_markup=approval_keyboard(uid))
 
-    if role == "rejected":
-        await message.answer("⛔ Доступ закрыт. Обратитесь к администратору.")
+
+# ---------------------------------------------------------------------------
+# Шаг регистрации: выбор роли через inline-кнопки
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "reg_role:seller")
+async def reg_role_seller(cq: CallbackQuery, state: FSMContext) -> None:
+    role = await _get_role(cq.from_user.id)
+    if role == "pending":
+        await cq.answer("⏳ Ваша заявка уже на рассмотрении.", show_alert=True)
+        return
+    if role is not None:
+        await cq.answer()
+        return
+    await state.set_state(Registration.waiting_utel_code)
+    await cq.message.edit_text(
+        "🛒 <b>Сотрудник</b>\n\n"
+        "Введите ваш <b>код оператора Utel</b> (внутренний номер, например: <code>101</code>):"
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "reg_role:manager")
+async def reg_role_manager(cq: CallbackQuery, state: FSMContext) -> None:
+    uid = cq.from_user.id
+    role = await _get_role(uid)
+    if role == "pending":
+        await cq.answer("⏳ Ваша заявка уже на рассмотрении.", show_alert=True)
+        return
+    if role is not None:
+        await cq.answer()
         return
 
-    # Авторизован — показываем меню по роли
-    await message.answer(MAIN_MENU_TEXT, reply_markup=main_menu_keyboard(role))
+    from app.bot.menu import approval_keyboard
+    from app.config import settings
+    from app.db import get_session
+    from app.repository import create_pending_user
+    from app.telegram import send_to_user
+
+    async with get_session() as session:
+        await create_pending_user(
+            session,
+            tg_user_id=uid,
+            username=cq.from_user.username,
+            full_name=cq.from_user.full_name,
+        )
+
+    await state.clear()
+    await cq.message.edit_text(
+        "👔 <b>Начальник</b>\n\n"
+        "⏳ <b>Заявка отправлена</b>\n"
+        "Администратор рассмотрит её и даст доступ. Ожидайте."
+    )
+    await cq.answer()
+
+    if settings.admin_user_id:
+        uname = f"@{cq.from_user.username}" if cq.from_user.username else "—"
+        text = (
+            f"🔔 <b>Новая заявка на доступ</b>\n\n"
+            f"Имя: {cq.from_user.full_name or '—'}\n"
+            f"Username: {uname}\n"
+            f"ID: <code>{uid}</code>\n"
+            f"Желаемая роль: 👔 Начальник\n\n"
+            "Выберите роль:"
+        )
+        await send_to_user(settings.admin_user_id, text, reply_markup=approval_keyboard(uid))
 
 
 # ---------------------------------------------------------------------------

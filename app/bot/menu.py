@@ -102,6 +102,14 @@ def callback_done_keyboard(tracking_id: str) -> InlineKeyboardMarkup:
 # Клавиатуры управления пользователями (только admin)
 # ---------------------------------------------------------------------------
 
+def role_select_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора роли при первичной регистрации."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Сотрудник", callback_data="reg_role:seller")],
+        [InlineKeyboardButton(text="👔 Начальник",  callback_data="reg_role:manager")],
+    ])
+
+
 def approval_keyboard(uid: int) -> InlineKeyboardMarkup:
     """Кнопки одобрения заявки нового пользователя."""
     return InlineKeyboardMarkup(inline_keyboard=[
