@@ -130,7 +130,7 @@ async def daily_report_job() -> None:
     from app.analytics_utel import get_period_stats
     from app.amocrm.reports import get_lead_metrics_by_users
     from app.db import get_session
-    from app.formatting import format_amocrm_users_report, format_utel_period_report
+    from app.formatting import format_amocrm_users_report, format_daily_utel_report
     from app.periods import period_yesterday
     from app.telegram import send_notification
 
@@ -142,7 +142,7 @@ async def daily_report_job() -> None:
     try:
         async with get_session() as session:
             utel_stats = await get_period_stats(session, from_utc, to_utc, tz_name=tz)
-        utel_text = format_utel_period_report(utel_stats, "Вчера", timezone_str=tz)
+        utel_text = format_daily_utel_report(utel_stats, timezone_str=tz)
     except Exception as exc:
         logger.error("Daily report: Utel stats failed: %s", exc)
         utel_text = "📞 <b>Звонки Utel — Вчера</b>\n⚠️ Ошибка получения данных"
@@ -184,7 +184,7 @@ def create_scheduler() -> AsyncIOScheduler:
     # Ежедневный отчёт за вчера — каждый день в 09:00 по Ташкенту
     _scheduler.add_job(
         daily_report_job,
-        trigger=CronTrigger(hour=15, minute=10, timezone="Asia/Tashkent"),
+        trigger=CronTrigger(hour=9, minute=0, timezone="Asia/Tashkent"),
         id="daily_report",
         name="Daily yesterday report",
         replace_existing=True,

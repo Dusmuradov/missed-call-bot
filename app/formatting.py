@@ -305,6 +305,61 @@ def format_utel_compare_report(
 # Форматтеры AmoCRM
 # ---------------------------------------------------------------------------
 
+def format_daily_utel_report(
+    stats,  # PeriodStats
+    timezone_str: str = "Asia/Tashkent",
+) -> str:
+    """
+    Компактный ежедневный отчёт Utel для утренней рассылки.
+    Без почасового дампа — акцент на операторах и исходящих.
+    """
+    from app.analytics_utel import PeriodStats
+    assert isinstance(stats, PeriodStats)
+
+    date_str = format_date_range(stats.from_utc, stats.to_utc, timezone_str)
+
+    cb_str = (
+        f"{stats.callbacks_done}/{stats.callbacks_total}"
+        if stats.callbacks_total > 0 else "—"
+    )
+
+    peak = stats.peak_hours
+    peak_str = ", ".join(f"{h:02d}:00 ({c} зв.)" for h, c in peak) or "—"
+
+    work_total = stats.work_incoming + stats.non_work_incoming
+    work_pct = round(stats.work_incoming / work_total * 100, 1) if work_total > 0 else 0.0
+
+    lines = [
+        "📞 <b>Звонки Utel — Вчера</b>",
+        f"📅 {date_str}",
+        "─────────────────────",
+        f"Входящих:   <b>{stats.total_incoming}</b>",
+        f"  Принято:    {stats.total_answered}  ({stats.answer_rate}%)",
+        f"  Пропущено:  {stats.total_missed}  ({stats.miss_rate}%)",
+        f"Исходящих:  <b>{stats.total_outgoing}</b>",
+        f"Перезвоны:  {cb_str}",
+        f"Пик часы:   {peak_str}",
+        f"В рабочее:  {stats.work_incoming} ({work_pct}%)",
+        "─────────────────────",
+        "<b>По операторам:</b>",
+    ]
+
+    ops = sorted(stats.operators.values(), key=lambda x: x.incoming, reverse=True)
+    if ops:
+        for op in ops:
+            cb = f"{op.callbacks_done}/{op.callbacks_total}" if op.callbacks_total > 0 else "—"
+            lines.append(
+                f"  <b>{op.name}</b>\n"
+                f"    Вх: {op.incoming} / Принято: {op.answered} ({op.answer_rate}%)"
+                f" / Пропущено: {op.missed}\n"
+                f"    Исх: {op.outgoing} / Перезвоны: {cb}"
+            )
+    else:
+        lines.append("  Нет данных за период")
+
+    return "\n".join(lines)
+
+
 def format_amocrm_period_report(
     metrics: dict,
     label: str,
