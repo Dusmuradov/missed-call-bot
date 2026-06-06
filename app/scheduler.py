@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
 
@@ -124,6 +125,47 @@ async def refresh_amocrm_token_job() -> None:
             pass
 
 
+async def daily_report_job() -> None:
+    """Ежедневный отчёт за вчерашний день — отправляется в группу в 09:00 по Ташкенту."""
+    from app.analytics_utel import get_period_stats
+    from app.amocrm.reports import get_lead_metrics_by_users
+    from app.db import get_session
+    from app.formatting import format_amocrm_users_report, format_utel_period_report
+    from app.periods import period_yesterday
+    from app.telegram import send_notification
+
+    logger.info("Running daily report job…")
+    from_utc, to_utc = period_yesterday()
+    tz = settings.timezone
+
+    # --- Utel отчёт ---
+    try:
+        async with get_session() as session:
+            utel_stats = await get_period_stats(session, from_utc, to_utc, tz_name=tz)
+        utel_text = format_utel_period_report(utel_stats, "Вчера", timezone_str=tz)
+    except Exception as exc:
+        logger.error("Daily report: Utel stats failed: %s", exc)
+        utel_text = "📞 <b>Звонки Utel — Вчера</b>\n⚠️ Ошибка получения данных"
+
+    # --- AmoCRM отчёт ---
+    try:
+        amo_result = await get_lead_metrics_by_users(from_utc, to_utc, tz_name=tz)
+        if amo_result.get("error"):
+            amo_text = f"📋 <b>AmoCRM лиды — Вчера</b>\n⚠️ {amo_result['error']}"
+        else:
+            amo_text = format_amocrm_users_report(
+                amo_result, "Вчера", from_utc=from_utc, to_utc=to_utc, timezone_str=tz
+            )
+    except Exception as exc:
+        logger.error("Daily report: AmoCRM stats failed: %s", exc)
+        amo_text = "📋 <b>AmoCRM лиды — Вчера</b>\n⚠️ Ошибка получения данных"
+
+    # Отправляем двумя сообщениями чтобы не превышать лимит 4096 символов
+    await send_notification(utel_text)
+    await send_notification(amo_text)
+    logger.info("Daily report sent.")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Создаёт и настраивает планировщик."""
     global _scheduler
@@ -136,6 +178,15 @@ def create_scheduler() -> AsyncIOScheduler:
         minutes=settings.callback_check_minutes,
         id="callback_escalation",
         name="Missed call callback escalation",
+        replace_existing=True,
+    )
+
+    # Ежедневный отчёт за вчера — каждый день в 09:00 по Ташкенту
+    _scheduler.add_job(
+        daily_report_job,
+        trigger=CronTrigger(hour=9, minute=0, timezone="Asia/Tashkent"),
+        id="daily_report",
+        name="Daily yesterday report",
         replace_existing=True,
     )
 
