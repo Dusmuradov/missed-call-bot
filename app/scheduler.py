@@ -68,19 +68,60 @@ async def check_callback_escalations() -> None:
 
 
 async def refresh_amocrm_token_job() -> None:
-    """Проактивно обновляет AmoCRM access_token если истекает через <30 мин."""
+    """Проактивно обновляет AmoCRM access_token если истекает через <2 часа."""
     if not settings.amocrm_subdomain:
         return
 
     try:
-        from app.amocrm.client import get_valid_client
-        client = await get_valid_client()
-        if client:
-            logger.debug("AmoCRM token OK (subdomain=%s)", client.subdomain)
-        else:
-            logger.warning("AmoCRM token refresh failed or token not configured.")
+        from app.amocrm.client import refresh_access_token
+        from app.db import get_session
+        from app.repository import get_amocrm_token, upsert_amocrm_token
+
+        async with get_session() as session:
+            token_row = await get_amocrm_token(session)
+
+        if token_row is None:
+            logger.warning("AmoCRM token not configured, skipping proactive refresh.")
+            return
+
+        # Проактивное обновление за 2 часа до истечения (перекрывает 30-минутный интервал)
+        needs_refresh = token_row.expires_at is None
+        if not needs_refresh:
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            needs_refresh = token_row.expires_at - now_utc < timedelta(hours=2)
+
+        if not needs_refresh:
+            logger.debug("AmoCRM token OK, expires at %s", token_row.expires_at)
+            return
+
+        logger.info("AmoCRM token expiring within 2h, proactively refreshing…")
+        tokens = await refresh_access_token(token_row.refresh_token)
+        expires_in = tokens.get("expires_in", 86400)
+        new_expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
+
+        async with get_session() as session:
+            await upsert_amocrm_token(
+                session,
+                subdomain=token_row.subdomain,
+                access_token=tokens["access_token"],
+                refresh_token=tokens["refresh_token"],
+                expires_at=new_expires,
+            )
+        logger.info("AmoCRM token proactively refreshed, expires at %s", new_expires)
+
     except Exception as exc:
         logger.exception("AmoCRM token refresh job failed: %s", exc)
+        try:
+            from app.telegram import send_to_user
+            if settings.admin_user_id:
+                msg = (
+                    "⚠️ <b>AmoCRM: плановое обновление токена провалилось!</b>\n"
+                    f"Ошибка: <code>{exc}</code>\n\n"
+                    "Пройдите повторную авторизацию: /amocrm/oauth/start"
+                )
+                await send_to_user(settings.admin_user_id, msg)
+        except Exception:
+            pass
 
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -98,11 +139,11 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Обновление токена AmoCRM каждые 6 часов
+    # Обновление токена AmoCRM каждые 30 минут (порог обновления — 2 часа до истечения)
     _scheduler.add_job(
         refresh_amocrm_token_job,
         trigger="interval",
-        hours=6,
+        minutes=30,
         id="amocrm_token_refresh",
         name="AmoCRM token refresh",
         replace_existing=True,
