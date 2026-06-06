@@ -184,7 +184,7 @@ def create_scheduler() -> AsyncIOScheduler:
     # Ежедневный отчёт за вчера — каждый день в 09:00 по Ташкенту
     _scheduler.add_job(
         daily_report_job,
-        trigger=CronTrigger(hour=9, minute=0, timezone="Asia/Tashkent"),
+        trigger=CronTrigger(hour=15, minute=10, timezone="Asia/Tashkent"),
         id="daily_report",
         name="Daily yesterday report",
         replace_existing=True,
