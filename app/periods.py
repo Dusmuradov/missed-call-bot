@@ -195,8 +195,11 @@ PERIOD_LABELS: dict[str, str] = {
     "this_week":    "Эта неделя",
     "last_week":    "Прошлая неделя",
     "this_month":   "Этот месяц",
+    "last_month":   "Прошлый месяц",
     "this_quarter": "Этот квартал",
+    "last_quarter": "Прошлый квартал",
     "this_year":    "Этот год",
+    "last_year":    "Прошлый год",
 }
 
 COMPARE_LABELS: dict[str, str] = {
@@ -213,8 +216,11 @@ PERIOD_FUNCS: dict[str, callable] = {
     "this_week":    period_this_week,
     "last_week":    period_last_week,
     "this_month":   period_this_month,
+    "last_month":   period_last_month,
     "this_quarter": period_this_quarter,
+    "last_quarter": period_last_quarter,
     "this_year":    period_this_year,
+    "last_year":    period_last_year,
 }
 
 COMPARE_FUNCS: dict[str, callable] = {

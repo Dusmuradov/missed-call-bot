@@ -13,7 +13,7 @@ SCHEMA = {
         "properties": {
             "period": {
                 "type": "string",
-                "enum": ["today", "yesterday", "this_week", "last_week", "this_month"],
+                "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year"],
                 "description": "Период. По умолчанию — today.",
             }
         },
@@ -51,3 +51,5 @@ async def run(params: dict, context: dict) -> dict:
         "non_work_hours_leads": metrics.get("non_work_hours", 0),
         "by_pipeline": metrics.get("by_pipeline", {}),
     }
+
+

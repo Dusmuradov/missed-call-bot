@@ -186,6 +186,7 @@ async def hermes_freeform(message: Message) -> None:
             tg_user_id=tg_id,
             user_text=message.text,
             amocrm_user_id=user.amocrm_user_id,
+            role=user.role or "employee",
         )
         await wait.edit_text(answer, parse_mode="HTML", disable_web_page_preview=True)
 

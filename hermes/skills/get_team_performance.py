@@ -13,7 +13,7 @@ SCHEMA = {
         "properties": {
             "period": {
                 "type": "string",
-                "enum": ["today", "yesterday", "this_week", "last_week", "this_month"],
+                "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year"],
                 "description": "Период. По умолчанию — today.",
             }
         },
@@ -76,3 +76,5 @@ async def _get_utel(from_utc, to_utc):
     from app.db import get_session
     async with get_session() as session:
         return await get_period_stats(session, from_utc, to_utc)
+
+

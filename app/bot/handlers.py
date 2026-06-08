@@ -756,5 +756,5 @@ async def handle_free_text(message: Message) -> None:
     await message.bot.send_chat_action(message.chat.id, "typing")
 
     from hermes.agent import ask
-    answer = await ask(message.from_user.id, message.text, amocrm_user_id=amocrm_user_id)
-    await message.answer(answer)
+    answer = await ask(message.from_user.id, message.text, amocrm_user_id=amocrm_user_id, role=role or "seller")
+    await message.answer(answer, disable_web_page_preview=True)

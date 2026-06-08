@@ -13,7 +13,7 @@ SCHEMA = {
         "properties": {
             "period": {
                 "type": "string",
-                "enum": ["this_week", "last_week", "this_month"],
+                "enum": ["this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year"],
                 "description": "Период для анализа. По умолчанию — this_month.",
             }
         },
@@ -80,3 +80,5 @@ async def run(params: dict, context: dict) -> dict:
         "group_C": {"count": len(c), "products": c[:10], "description": "Аутсайдеры — акции или вывод"},
         "top3_by_profit": sorted(products, key=lambda x: x["net_profit"], reverse=True)[:3],
     }
+
+

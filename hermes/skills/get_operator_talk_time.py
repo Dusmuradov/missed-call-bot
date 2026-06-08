@@ -15,7 +15,7 @@ SCHEMA = {
         "properties": {
             "period": {
                 "type": "string",
-                "enum": ["today", "yesterday", "this_week", "last_week", "this_month"],
+                "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_quarter", "last_quarter", "this_year"],
                 "description": "Период. По умолчанию — this_month.",
             }
         },
@@ -68,3 +68,5 @@ async def run(params: dict, context: dict) -> dict:
         "operators": operators,
         "total_talk_min_all": round(total_sec_all / 60, 1),
     }
+
+
