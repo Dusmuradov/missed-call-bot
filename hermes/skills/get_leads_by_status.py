@@ -87,7 +87,7 @@ async def run(params: dict, context: dict) -> dict:
         leads.append({
             "id": lead_id,
             "name": lead.get("name") or f"Сделка #{lead_id}",
-            "price": lead.get("price") or 0,
+            "deal_estimate_uzs": lead.get("price") or 0,  # оценка менеджера, не продажа
             "responsible": (lead.get("responsible_user") or {}).get("name") or "—",
             "status": info.get("status_name", ""),
             "pipeline": info.get("pipeline_name", ""),
@@ -96,12 +96,12 @@ async def run(params: dict, context: dict) -> dict:
         if len(leads) >= limit:
             break
 
-    total_price = sum(l["price"] for l in leads)
+    total_estimate = sum(l["deal_estimate_uzs"] for l in leads)
     return {
         "period": PERIOD_LABELS.get(key, key),
         "status_searched": status_name,
         "count": len(leads),
-        "total_price": total_price,
+        "total_deal_estimate_uzs": total_estimate,  # сумма оценок, не выручка
         "leads": leads,
     }
 

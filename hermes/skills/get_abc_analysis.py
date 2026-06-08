@@ -23,6 +23,9 @@ SCHEMA = {
 
 
 async def run(params: dict, context: dict) -> dict:
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
     from app.billz import reports
     from app.config import settings
     from app.periods import PERIOD_FUNCS, PERIOD_LABELS
@@ -34,9 +37,11 @@ async def run(params: dict, context: dict) -> dict:
     if key not in PERIOD_FUNCS:
         key = "this_month"
 
+    _TZ = ZoneInfo("Asia/Tashkent")
+    _UTC = timezone.utc
     from_utc, to_utc = PERIOD_FUNCS[key]()
-    start = from_utc.strftime("%Y-%m-%d")
-    end = to_utc.strftime("%Y-%m-%d")
+    start = from_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
+    end = to_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
 
     try:
         rows = await reports.get_product_sales(start, end)

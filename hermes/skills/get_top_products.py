@@ -27,6 +27,9 @@ SCHEMA = {
 
 
 async def run(params: dict, context: dict) -> dict:
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
     from app.billz import aggregator as agg
     from app.billz import reports
     from app.config import settings
@@ -40,9 +43,11 @@ async def run(params: dict, context: dict) -> dict:
         key = "yesterday"
     limit = min(int(params.get("limit") or 10), 20)
 
+    _TZ = ZoneInfo("Asia/Tashkent")
+    _UTC = timezone.utc
     from_utc, to_utc = PERIOD_FUNCS[key]()
-    start = from_utc.strftime("%Y-%m-%d")
-    end = to_utc.strftime("%Y-%m-%d")
+    start = from_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
+    end = to_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
 
     try:
         rows = await reports.get_product_sales(start, end)

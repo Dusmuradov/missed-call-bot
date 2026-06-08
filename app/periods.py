@@ -89,18 +89,18 @@ def _start_of_year(dt: datetime) -> datetime:
 # ---------------------------------------------------------------------------
 
 def period_today() -> tuple[datetime, datetime]:
-    """Текущие рабочие сутки: от 09:00 до сейчас."""
+    """Текущие сутки: от 00:00 до сейчас."""
     now = _now_local()
-    start = _business_day_start(now)
+    start = _start_of_day(now)
     return _to_utc(start), _to_utc(now)
 
 
 def period_yesterday() -> tuple[datetime, datetime]:
-    """Прошлые рабочие сутки: от 09:00 вчера до 09:00 сегодня."""
+    """Вчерашние сутки: от 00:00 до 23:59:59."""
     now = _now_local()
-    end = _business_day_start(now)            # 09:00 начала текущих суток
-    start = end - timedelta(days=1)           # 09:00 предыдущих суток
-    return _to_utc(start), _to_utc(end - timedelta(microseconds=1))
+    start = _start_of_day(now - timedelta(days=1))
+    end = _start_of_day(now) - timedelta(microseconds=1)
+    return _to_utc(start), _to_utc(end)
 
 
 def period_this_week() -> tuple[datetime, datetime]:

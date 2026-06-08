@@ -24,7 +24,8 @@ SCHEMA = {
 
 
 async def run(params: dict, context: dict) -> dict:
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
 
     from app.billz import reports
     from app.config import settings
@@ -32,7 +33,8 @@ async def run(params: dict, context: dict) -> dict:
     if not settings.billz_secret or not settings.billz_company_id:
         return {"error": "BILLZ не настроен (нет BILLZ_SECRET или BILLZ_COMPANY_ID)"}
 
-    date_str = params.get("date") or str(date.today() - timedelta(days=1))
+    _today_tashkent = datetime.now(ZoneInfo("Asia/Tashkent")).date()
+    date_str = params.get("date") or str(_today_tashkent - timedelta(days=1))
 
     try:
         summary = await reports.get_summary(date_str, date_str)

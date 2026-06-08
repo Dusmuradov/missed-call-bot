@@ -59,7 +59,7 @@ async def run(params: dict, context: dict) -> dict:
         leads.append({
             "id": lead_id,
             "name": lead.get("name") or f"Сделка #{lead_id}",
-            "price": lead.get("price") or 0,
+            "deal_estimate_uzs": lead.get("price") or 0,  # оценка менеджера, не продажа
             "responsible": (lead.get("responsible_user") or {}).get("name") or "—",
             "status_id": sid,
             "url": f"https://{settings.amocrm_subdomain}.amocrm.ru/leads/detail/{lead_id}",

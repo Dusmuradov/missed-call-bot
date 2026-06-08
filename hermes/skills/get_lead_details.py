@@ -83,7 +83,7 @@ async def run(params: dict, context: dict) -> dict:
     return {
         "id": lead_id,
         "name": lead.get("name") or f"Сделка #{lead_id}",
-        "price": lead.get("price") or 0,
+        "deal_estimate_uzs": lead.get("price") or 0,  # оценка менеджера, не фактическая продажа
         "status_id": status_id,
         "pipeline": pipeline_name,
         "responsible_id": lead.get("responsible_user_id"),
