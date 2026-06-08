@@ -215,11 +215,11 @@ async def cb_approve(cq: CallbackQuery) -> None:
             f"✅ <b>{name}</b> одобрен как {role_label}."
         )
         from app.telegram import send_to_user
-        from app.bot.menu import main_menu_keyboard, MAIN_MENU_TEXT
+        from app.bot.menu import main_reply_keyboard, MAIN_MENU_TEXT
         await send_to_user(
             uid,
             f"✅ Ваш доступ одобрен!\nРоль: {role_label}\n\n" + MAIN_MENU_TEXT,
-            reply_markup=main_menu_keyboard(role),
+            reply_markup=main_reply_keyboard(role),
         )
 
 
@@ -303,12 +303,12 @@ async def _finish_seller_approval(
     await cq.message.edit_text(
         f"✅ <b>{name}</b> одобрен как продавец.\n{mapping_info}"
     )
-    from app.bot.menu import MAIN_MENU_TEXT, main_menu_keyboard
+    from app.bot.menu import MAIN_MENU_TEXT, main_reply_keyboard
     from app.telegram import send_to_user
     await send_to_user(
         uid,
         "✅ Ваш доступ одобрен!\nРоль: 🛒 Продавец\n\n" + MAIN_MENU_TEXT,
-        reply_markup=main_menu_keyboard("seller"),
+        reply_markup=main_reply_keyboard("seller"),
     )
 
 

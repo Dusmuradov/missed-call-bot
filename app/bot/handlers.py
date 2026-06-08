@@ -18,8 +18,10 @@ from app.bot.menu import (
     compare_period_keyboard,
     compare_type_keyboard,
     main_menu_keyboard,
+    main_reply_keyboard,
     period_keyboard,
     role_select_keyboard,
+    users_list_keyboard,
 )
 from app.periods import COMPARE_FUNCS, COMPARE_LABELS, PERIOD_FUNCS, PERIOD_LABELS
 
@@ -85,7 +87,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await message.answer("⛔ Доступ закрыт. Обратитесь к администратору.")
         return
 
-    await message.answer(MAIN_MENU_TEXT, reply_markup=main_menu_keyboard(role))
+    await message.answer(MAIN_MENU_TEXT, reply_markup=main_reply_keyboard(role))
 
 # ---------------------------------------------------------------------------
 # Шаг регистрации: ввод кода оператора Utel
@@ -209,6 +211,60 @@ async def reg_role_manager(cq: CallbackQuery, state: FSMContext) -> None:
             "Выберите роль:"
         )
         await send_to_user(settings.admin_user_id, text, reply_markup=approval_keyboard(uid))
+
+
+# ---------------------------------------------------------------------------
+# Хендлеры кнопок постоянного нижнего меню (ReplyKeyboard)
+# ---------------------------------------------------------------------------
+
+_PERIOD_BTNS: dict[str, tuple[str, str]] = {
+    "📋 AmoCRM лиды":     ("amocrm",       "📋 <b>AmoCRM лиды</b>\n\nВыберите период:"),
+    "📞 Звонки Utel":     ("utel",         "📞 <b>Звонки Utel</b>\n\nВыберите период:"),
+    "👤 Сотрудники CRM":  ("amocrm_users", "👤 <b>Сотрудники AmoCRM</b>\n\nВыберите период:"),
+    "👥 По операторам":   ("operators",    "👥 <b>По операторам</b>\n\nВыберите период:"),
+    "🔴 Пропущенные":     ("missed",       "🔴 <b>Пропущенные звонки</b>\n\nВыберите период:"),
+    "📞 Мои звонки":      ("my_utel",      "📞 <b>Мои звонки</b>\n\nВыберите период:"),
+    "🔴 Мои пропущенные": ("my_missed",    "🔴 <b>Мои пропущенные</b>\n\nВыберите период:"),
+    "📋 Мои лиды AmoCRM": ("my_amocrm",   "📋 <b>Мои лиды AmoCRM</b>\n\nВыберите период:"),
+}
+
+
+@router.message(F.text.in_(_PERIOD_BTNS))
+async def handle_period_btn(message: Message) -> None:
+    role = await _get_role(message.from_user.id)
+    if not has_access(role, SELLER):
+        return
+    prefix, text = _PERIOD_BTNS[message.text]
+    await message.answer(text, reply_markup=period_keyboard(prefix, back="menu:main"))
+
+
+@router.message(F.text == "📈 Сравнения")
+async def handle_compare_btn(message: Message) -> None:
+    role = await _get_role(message.from_user.id)
+    if not has_access(role, MANAGER):
+        return
+    await message.answer(
+        "📈 <b>Сравнение периодов</b>\n\nВыберите тип данных:",
+        reply_markup=compare_type_keyboard(),
+    )
+
+
+@router.message(F.text == "👥 Пользователи")
+async def handle_users_btn(message: Message) -> None:
+    role = await _get_role(message.from_user.id)
+    if not has_access(role, ADMIN):
+        return
+    from app.db import get_session
+    from app.repository import list_bot_users
+    async with get_session() as session:
+        users = await list_bot_users(session)
+    if not users:
+        await message.answer("👥 <b>Пользователи</b>\n\nСписок пуст.", reply_markup=users_list_keyboard([]))
+    else:
+        await message.answer(
+            f"👥 <b>Пользователи</b> ({len(users)} чел.)\n\nНажмите 🗑 для удаления:",
+            reply_markup=users_list_keyboard(users),
+        )
 
 
 # ---------------------------------------------------------------------------

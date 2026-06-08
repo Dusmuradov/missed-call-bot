@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from app.auth import ADMIN, MANAGER, SELLER
 from app.periods import COMPARE_LABELS, PERIOD_LABELS
@@ -12,6 +12,26 @@ from app.periods import COMPARE_LABELS, PERIOD_LABELS
 # ---------------------------------------------------------------------------
 # Главное меню (зависит от роли)
 # ---------------------------------------------------------------------------
+
+def main_reply_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
+    """Постоянная клавиатура внизу чата. Набор кнопок зависит от роли."""
+    if role == SELLER:
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📞 Мои звонки"), KeyboardButton(text="🔴 Мои пропущенные")],
+                [KeyboardButton(text="📋 Мои лиды AmoCRM")],
+            ],
+            resize_keyboard=True,
+        )
+    rows = [
+        [KeyboardButton(text="📋 AmoCRM лиды"), KeyboardButton(text="📞 Звонки Utel")],
+        [KeyboardButton(text="👤 Сотрудники CRM"), KeyboardButton(text="👥 По операторам")],
+        [KeyboardButton(text="🔴 Пропущенные"), KeyboardButton(text="📈 Сравнения")],
+    ]
+    if role == ADMIN:
+        rows.append([KeyboardButton(text="👥 Пользователи")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
 
 def main_menu_keyboard(role: Optional[str] = None) -> InlineKeyboardMarkup:
     """Главное меню отчётов. Набор кнопок зависит от роли пользователя."""
