@@ -53,7 +53,9 @@ async def run(params: dict, context: dict) -> dict:
     if not isinstance(utel_stats, Exception) and utel_stats:
         ops = []
         for ext, op in (utel_stats.operators or {}).items():
-            ops.append({
+            total_sec = op.total_wait_seconds or 0
+        avg_sec = round(op.total_wait_seconds / op.call_count_for_avg) if op.call_count_for_avg else 0
+        ops.append({
                 "ext": ext,
                 "name": op.name or ext,
                 "incoming": op.incoming,
@@ -61,6 +63,8 @@ async def run(params: dict, context: dict) -> dict:
                 "miss_rate": round(op.missed / op.incoming * 100, 1) if op.incoming else 0,
                 "callbacks_done": op.callbacks_done,
                 "callbacks_total": op.callbacks_total,
+                "total_talk_min": round(total_sec / 60, 1),
+                "avg_talk_sec": avg_sec,
             })
         result["operators"] = sorted(ops, key=lambda x: x["incoming"], reverse=True)
 
