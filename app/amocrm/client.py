@@ -42,6 +42,8 @@ class AmocrmClient:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(url, headers=self._headers(), params=params or {})
             resp.raise_for_status()
+            if resp.status_code == 204 or not resp.content:
+                return {}
             return resp.json()
 
     async def get_account(self) -> dict:

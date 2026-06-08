@@ -52,33 +52,40 @@ async def run(params: dict, context: dict) -> dict:
     contacts_raw = (lead.get("_embedded") or {}).get("contacts") or []
     contacts = [{"name": c.get("name"), "id": c.get("id")} for c in contacts_raw]
 
-    # Статусные данные
-    from app.amocrm.reports import _pipeline_names_cache, _unprocessed_cache, _load_unprocessed_statuses
-    if not _unprocessed_cache:
-        await _load_unprocessed_statuses(client)
-
     pipeline_id = lead.get("pipeline_id")
     status_id = lead.get("status_id")
-    pipeline_name = _pipeline_names_cache.get(pipeline_id, f"Pipeline {pipeline_id}")
+    pipeline_name = f"Pipeline {pipeline_id}"
+    try:
+        from app.amocrm.reports import _pipeline_names_cache, _load_unprocessed_statuses
+        if pipeline_id not in _pipeline_names_cache:
+            await _load_unprocessed_statuses(client)
+        pipeline_name = _pipeline_names_cache.get(pipeline_id, pipeline_name)
+    except Exception:
+        pass
 
     # Заметки
-    notes_raw = await client.get_lead_notes(lead_id)
     notes = []
-    for n in notes_raw[:5]:
-        note_type = n.get("note_type")
-        params_n = n.get("params") or {}
-        text = params_n.get("text") or params_n.get("note") or ""
-        if text:
-            notes.append({"type": note_type, "text": text[:300]})
+    try:
+        notes_raw = await client.get_lead_notes(lead_id)
+        for n in notes_raw[:5]:
+            params_n = n.get("params") or {}
+            text = params_n.get("text") or params_n.get("note") or ""
+            if text:
+                notes.append({"type": n.get("note_type"), "text": text[:300]})
+    except Exception:
+        pass
 
     # Задачи
-    tasks_raw = await client.get_lead_tasks(lead_id)
     tasks = []
-    for t in tasks_raw:
-        tasks.append({
-            "text": t.get("text") or "",
-            "due_at": t.get("complete_till"),
-        })
+    try:
+        tasks_raw = await client.get_lead_tasks(lead_id)
+        for t in tasks_raw:
+            tasks.append({
+                "text": t.get("text") or "",
+                "due_at": t.get("complete_till"),
+            })
+    except Exception:
+        pass
 
     return {
         "id": lead_id,
