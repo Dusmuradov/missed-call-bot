@@ -81,6 +81,20 @@ async def health() -> dict[str, str]:
 # AmoCRM OAuth (первичная авторизация — одноразово)
 # ---------------------------------------------------------------------------
 
+@app.get("/debug/config", tags=["meta"])
+async def debug_config() -> dict:
+    """Показывает статус ключевых переменных (без значений) для диагностики Railway."""
+    return {
+        "amocrm_long_lived_token": bool(settings.amocrm_long_lived_token),
+        "amocrm_subdomain": settings.amocrm_subdomain or "(not set)",
+        "deepseek_api_key": bool(settings.deepseek_api_key),
+        "billz_secret": bool(settings.billz_secret),
+        "billz_company_id": bool(settings.billz_company_id),
+        "bot_token": bool(settings.bot_token),
+        "telegram_chat_id": bool(settings.telegram_chat_id),
+    }
+
+
 @app.get("/amocrm/users", tags=["amocrm"])
 async def amocrm_users() -> dict:
     """Список пользователей AmoCRM с id и email."""
