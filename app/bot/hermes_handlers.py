@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.auth import Role, has_access
+from app.auth import SELLER, has_access
 from app.db import get_session
 from app.repository import get_bot_user
 
@@ -20,7 +20,7 @@ async def _get_user_with_amo(message: Message):
     async with get_session() as session:
         user = await get_bot_user(session, tg_id)
 
-    if user is None or not has_access(user, Role.SELLER):
+    if user is None or not has_access(user.role, SELLER):
         await message.answer("Нет доступа.")
         return None
 
@@ -169,7 +169,7 @@ async def hermes_freeform(message: Message) -> None:
     async with get_session() as session:
         user = await get_bot_user(session, tg_id)
 
-    if user is None or not has_access(user, Role.SELLER):
+    if user is None or not has_access(user.role, SELLER):
         return
 
     try:
