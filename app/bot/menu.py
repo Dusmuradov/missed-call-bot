@@ -54,6 +54,9 @@ def main_menu_keyboard(role: Optional[str] = None) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📈 Сравнения",     callback_data="menu:compare_type"),
         ],
     ]
+    rows.append([
+        InlineKeyboardButton(text="📦 BILLZ отчёт", callback_data="menu:billz"),
+    ])
     if role == ADMIN:
         rows.append([
             InlineKeyboardButton(text="👥 Пользователи", callback_data="menu:users"),

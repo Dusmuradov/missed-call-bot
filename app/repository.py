@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AmocrmToken, BotUser, Call, MissedTracking
+from app.models import AmocrmToken, BillzSnapshot, BillzToken, BotUser, Call, MissedTracking
 
 logger = logging.getLogger(__name__)
 
@@ -294,3 +294,64 @@ async def upsert_amocrm_token(
     token.expires_at = expires_at
     await session.flush()
     return token
+
+
+# ---------------------------------------------------------------------------
+# BillzToken
+# ---------------------------------------------------------------------------
+
+async def get_billz_token(session: AsyncSession) -> Optional[BillzToken]:
+    result = await session.execute(select(BillzToken).where(BillzToken.id == 1))
+    return result.scalar_one_or_none()
+
+
+async def upsert_billz_token(
+    session: AsyncSession,
+    *,
+    access_token: str,
+    refresh_token: str,
+    expires_at: Optional[datetime],
+) -> BillzToken:
+    row = await get_billz_token(session)
+    if row is None:
+        row = BillzToken(id=1)
+        session.add(row)
+    row.access_token = access_token
+    row.refresh_token = refresh_token
+    row.expires_at = expires_at
+    await session.flush()
+    return row
+
+
+# ---------------------------------------------------------------------------
+# BillzSnapshot
+# ---------------------------------------------------------------------------
+
+async def get_billz_snapshot(session: AsyncSession, snapshot_date: str) -> Optional[BillzSnapshot]:
+    """Возвращает снимок KPI за указанную дату (yyyy-MM-dd) или None."""
+    result = await session.execute(
+        select(BillzSnapshot).where(BillzSnapshot.snapshot_date == snapshot_date)
+    )
+    return result.scalar_one_or_none()
+
+
+async def save_billz_snapshot(
+    session: AsyncSession,
+    *,
+    snapshot_date: str,
+    revenue: float,
+    orders: int,
+    aov: float,
+    items_sold: float,
+) -> BillzSnapshot:
+    """Upsert: создаёт или обновляет снимок за дату."""
+    row = await get_billz_snapshot(session, snapshot_date)
+    if row is None:
+        row = BillzSnapshot(snapshot_date=snapshot_date)
+        session.add(row)
+    row.revenue = revenue
+    row.orders = orders
+    row.aov = aov
+    row.items_sold = items_sold
+    await session.flush()
+    return row

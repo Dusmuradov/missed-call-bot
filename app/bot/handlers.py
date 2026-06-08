@@ -667,6 +667,38 @@ async def cb_my_amocrm_report(cq: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
+# BILLZ POS отчёт (on-demand)
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "menu:billz")
+async def cb_billz_report(cq: CallbackQuery) -> None:
+    """On-demand запуск BILLZ-дайджеста за вчера (только admin/manager)."""
+    role = await _check(cq, MANAGER)
+    if role is None:
+        return
+
+    from app.config import settings as _settings
+    if not _settings.billz_secret or not _settings.billz_company_id:
+        await cq.message.edit_text(
+            "⚠️ <b>BILLZ не настроен</b>\n\n"
+            "Задайте <code>BILLZ_SECRET</code> и <code>BILLZ_COMPANY_ID</code> в .env",
+            reply_markup=None,
+        )
+        await cq.answer()
+        return
+
+    await cq.message.edit_text(
+        "⏳ <b>Загружаю данные BILLZ…</b>\n\nДайджест за вчера будет готов через ~30–60 сек.",
+        reply_markup=None,
+    )
+    await cq.answer()
+
+    import asyncio
+    from app.scheduler import run_billz_digest_now
+    asyncio.create_task(run_billz_digest_now())
+
+
+# ---------------------------------------------------------------------------
 # Кнопка «Перезвонил» (все авторизованные роли)
 # ---------------------------------------------------------------------------
 
@@ -700,3 +732,29 @@ async def cb_callback_done(cq: CallbackQuery) -> None:
         pass
     await cq.answer("✅ Отмечено!")
     logger.info("Manual callback marked for tracking_id=%s by %s", tracking_id, by_name)
+
+
+# ---------------------------------------------------------------------------
+# Catch-all: свободный текст → Hermes AI
+# Регистрируется последним — срабатывает только если ни один хендлер выше не совпал.
+# ---------------------------------------------------------------------------
+
+@router.message(F.text)
+async def handle_free_text(message: Message) -> None:
+    """Любой текст (не команда, не кнопка меню) → Hermes AI-агент."""
+    from app.config import settings as _settings
+    if not _settings.deepseek_api_key:
+        return
+
+    role = await _get_role(message.from_user.id)
+    if not has_access(role, SELLER):
+        return
+
+    user = await _get_seller_user(message.from_user.id)
+    amocrm_user_id = user.amocrm_user_id if user else None
+
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    from hermes.agent import ask
+    answer = await ask(message.from_user.id, message.text, amocrm_user_id=amocrm_user_id)
+    await message.answer(answer)

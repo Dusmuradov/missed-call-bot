@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     # Если пустой — используется первый статус из API /leads/pipelines.
     amocrm_initial_status_id: int = 0
 
+    # --- BILLZ POS ---
+    billz_api_url: str = "https://api-admin.billz.ai"
+    billz_secret: str = ""
+    billz_company_id: str = ""
+    billz_platform_id: str = "7d4a4c38-dd84-4902-b744-0488b80a4c01"
+    # UUID магазинов через запятую (используется как shop_ids в report-эндпоинтах).
+    # Если пусто — отчёты без фильтра по магазину.
+    billz_shop_ids: str = ""
+    billz_currency: str = "UZS"
+    billz_digest_hour: int = 9     # час отправки ежедневного BILLZ-дайджеста
+
     # --- Hermes AI Agent ---
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"

@@ -144,3 +144,37 @@ _hermes_audit_idx = Index(
     HermesAuditCache.amocrm_user_id,
     HermesAuditCache.lead_id,
 )
+
+
+class BillzToken(Base):
+    """Одна строка — токены BILLZ POS (один аккаунт)."""
+
+    __tablename__ = "billz_token"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class BillzSnapshot(Base):
+    """
+    Ежедневный снимок KPI из BILLZ.
+    Используется для WoW/DoD сравнений без перезагрузки истории.
+    """
+
+    __tablename__ = "billz_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Дата отчёта (yyyy-MM-dd, локальная Asia/Tashkent)
+    snapshot_date: Mapped[str] = mapped_column(String(10), unique=True, nullable=False, index=True)
+    revenue: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    aov: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    items_sold: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )

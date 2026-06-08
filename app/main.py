@@ -166,6 +166,24 @@ async def amocrm_oauth_callback(code: str, state: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# BILLZ debug routes
+# ---------------------------------------------------------------------------
+
+@app.get("/billz/run-daily", tags=["billz"])
+async def billz_run_daily() -> dict:
+    """
+    Ручной запуск BILLZ-дайджеста за вчера.
+    Используется для тестирования без ожидания расписания (09:05).
+    """
+    if not settings.billz_secret or not settings.billz_company_id:
+        return {"error": "BILLZ_SECRET или BILLZ_COMPANY_ID не заданы в .env"}
+    import asyncio
+    from app.scheduler import run_billz_digest_now
+    asyncio.create_task(run_billz_digest_now())
+    return {"ok": True, "message": "BILLZ дайджест запущен в фоне — проверьте Telegram"}
+
+
+# ---------------------------------------------------------------------------
 # Webhook Utel
 # ---------------------------------------------------------------------------
 

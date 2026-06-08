@@ -201,6 +201,140 @@ async def hermes_morning_digest_job() -> None:
         logger.exception("Hermes morning digest job failed: %s", exc)
 
 
+async def billz_daily_digest_job() -> None:
+    """
+    Ежедневный POS-дайджест из BILLZ — отправляется в группу в 09:05 по Ташкенту.
+    Пайплайн: BILLZ API → aggregate → DeepSeek AI → Telegram.
+    """
+    from zoneinfo import ZoneInfo
+
+    from app.billz import aggregator as agg
+    from app.billz import ai as billz_ai
+    from app.billz import reports
+    from app.db import get_session
+    from app.formatting import build_billz_digest
+    from app.repository import get_billz_snapshot, save_billz_snapshot
+    from app.telegram import send_notification
+
+    logger.info("BILLZ daily digest job starting…")
+    tz = ZoneInfo(settings.timezone)
+
+    # Дата «вчера» в локальной таймзоне
+    from datetime import datetime, timezone as _tz
+    now_local = datetime.now(_tz.utc).astimezone(tz)
+    yesterday = (now_local - __import__("datetime").timedelta(days=1)).date()
+    date_str = yesterday.strftime("%Y-%m-%d")
+    period_label = yesterday.strftime("%d.%m.%Y")
+
+    # Загрузить снимок «позавчера» для сравнения
+    day_before = (yesterday - __import__("datetime").timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        async with get_session() as session:
+            prev_row = await get_billz_snapshot(session, day_before)
+        prev_snapshot = (
+            {"revenue": prev_row.revenue, "orders": prev_row.orders,
+             "aov": prev_row.aov, "items_sold": prev_row.items_sold}
+            if prev_row else None
+        )
+    except Exception as exc:
+        logger.warning("BILLZ: could not load prev snapshot: %s", exc)
+        prev_snapshot = None
+
+    # Получить и распарсить заказы за вчера
+    order_details: list[dict] = []
+    try:
+        async for order in reports.iter_orders(date_str, date_str):
+            detail = await reports.get_order_detail(order["id"])
+            if detail:
+                order_details.append(reports.parse_order_detail(detail))
+        logger.info("BILLZ: fetched %d orders for %s", len(order_details), date_str)
+    except Exception as exc:
+        logger.error("BILLZ: order fetch failed: %s", exc)
+        await send_notification(
+            f"📊 <b>BILLZ дайджест {period_label}</b>\n⚠️ Ошибка получения данных: {exc}"
+        )
+        return
+
+    # Агрегация KPI продаж
+    kpi = agg.aggregate(order_details, period_label=period_label, prev_snapshot=prev_snapshot)
+
+    # Параллельный сбор всех отчётных данных
+    stock_res, imports_res, prod_sales_res, sup_sales_res, summary_res = await asyncio.gather(
+        reports.get_stock(date_str),
+        reports.get_imports(date_str, date_str),
+        reports.get_product_sales(date_str, date_str),
+        reports.get_supplier_sales(date_str, date_str),
+        reports.get_summary(date_str, date_str),
+        return_exceptions=True,
+    )
+
+    if isinstance(stock_res, Exception):
+        logger.warning("BILLZ: stock failed: %s", stock_res)
+        kpi["stock"] = None
+    elif stock_res:
+        kpi["stock"] = agg.aggregate_stock(stock_res, kpi.get("velocity") or {})
+        logger.info("BILLZ: stock aggregated (%d rows)", len(stock_res))
+
+    if isinstance(imports_res, Exception):
+        logger.warning("BILLZ: imports failed: %s", imports_res)
+        kpi["imports"] = None
+    else:
+        kpi["imports"] = agg.aggregate_imports(imports_res or [])
+        logger.info("BILLZ: imports aggregated (%d rows)", len(imports_res or []))
+
+    if isinstance(prod_sales_res, Exception):
+        logger.warning("BILLZ: product-sales failed: %s", prod_sales_res)
+        kpi["product_sales"] = None
+    else:
+        kpi["product_sales"] = agg.aggregate_product_sales(prod_sales_res or [])
+        logger.info("BILLZ: product-sales aggregated (%d rows)", len(prod_sales_res or []))
+
+    if isinstance(sup_sales_res, Exception):
+        logger.warning("BILLZ: supplier-sales failed: %s", sup_sales_res)
+        kpi["supplier_sales"] = None
+    else:
+        kpi["supplier_sales"] = agg.aggregate_supplier_sales(sup_sales_res or [])
+        logger.info("BILLZ: supplier-sales aggregated (%d rows)", len(sup_sales_res or []))
+
+    kpi["summary"] = None if isinstance(summary_res, Exception) else summary_res
+    if isinstance(summary_res, Exception):
+        logger.warning("BILLZ: summary failed: %s", summary_res)
+
+    # Сохранить снимок текущего дня
+    try:
+        snap = agg.snapshot_from_kpi(kpi)
+        async with get_session() as session:
+            await save_billz_snapshot(
+                session,
+                snapshot_date=date_str,
+                revenue=snap["revenue"],
+                orders=snap["orders"],
+                aov=snap["aov"],
+                items_sold=snap["items_sold"],
+            )
+    except Exception as exc:
+        logger.warning("BILLZ: could not save snapshot: %s", exc)
+
+    # AI-анализ
+    try:
+        ai_blocks = await billz_ai.analyze(kpi)
+    except Exception as exc:
+        logger.error("BILLZ: AI analysis failed: %s", exc)
+        ai_blocks = billz_ai._fallback(str(exc))
+
+    # Форматирование и отправка
+    messages = build_billz_digest(kpi, ai_blocks)
+    for msg in messages:
+        await send_notification(msg)
+
+    logger.info("BILLZ daily digest sent (%d messages).", len(messages))
+
+
+async def run_billz_digest_now() -> None:
+    """Ручной запуск дайджеста для текущей даты (для /billz/run-daily эндпоинта)."""
+    await billz_daily_digest_job()
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Создаёт и настраивает планировщик."""
     global _scheduler
@@ -243,6 +377,25 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Hermes morning digest",
         replace_existing=True,
     )
+
+    # BILLZ: ежедневный POS-дайджест в billz_digest_hour
+    if settings.billz_secret and settings.billz_company_id:
+        _scheduler.add_job(
+            billz_daily_digest_job,
+            trigger=CronTrigger(
+                hour=settings.billz_digest_hour, minute=5, timezone=settings.timezone
+            ),
+            id="billz_daily_digest",
+            name="BILLZ daily POS digest",
+            replace_existing=True,
+        )
+        logger.info(
+            "BILLZ daily digest scheduled at %02d:05 %s",
+            settings.billz_digest_hour,
+            settings.timezone,
+        )
+    else:
+        logger.info("BILLZ daily digest NOT scheduled: BILLZ_SECRET or BILLZ_COMPANY_ID not set")
 
     return _scheduler
 

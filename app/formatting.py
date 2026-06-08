@@ -496,3 +496,118 @@ def format_amocrm_compare_report(
         f"% обработки:  {_delta(metrics_cur.get('conversion_rate', 0.0), metrics_prev.get('conversion_rate', 0.0), unit='%')}",
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# BILLZ POS дайджест
+# ---------------------------------------------------------------------------
+
+def build_billz_digest(kpi: dict, ai: dict) -> list[str]:
+    """
+    Строит список HTML-сообщений для Telegram из KPI и AI-анализа.
+    Разбивает на несколько частей чтобы не превышать лимит 4096 символов.
+    Возвращает список строк — каждая шлётся отдельным send_notification().
+    """
+    period = kpi.get("period", "—")
+    revenue = kpi.get("revenue", 0)
+    orders = kpi.get("orders", 0)
+    aov = kpi.get("aov", 0)
+    items_sold = kpi.get("items_sold", 0)
+    cash = kpi.get("cash", 0)
+    card = kpi.get("card", 0)
+
+    # Динамика
+    cmp = kpi.get("comparison") or {}
+    if cmp.get("wow_pct") is not None:
+        sign = "▲" if cmp["wow_pct"] >= 0 else "▼"
+        dyn = f"{sign}<b>{abs(cmp['wow_pct']):.1f}%</b> vs пред. период"
+    else:
+        dyn = "—"
+
+    # Метод оплаты
+    total_pay = cash + card
+    if total_pay > 0:
+        pay_line = (
+            f"💵 Наличные: {cash:,.0f} ({cash / total_pay * 100:.0f}%)  "
+            f"💳 Карта: {card:,.0f} ({card / total_pay * 100:.0f}%)"
+        )
+    else:
+        pay_line = "—"
+
+    # ── Сообщение 1: Ключевые метрики + Продажи ──
+    ai_prodaji = ai.get("prodaji") or {}
+    highlights = "\n".join(f"  ✅ {h}" for h in (ai_prodaji.get("highlights") or []))
+    warnings = "\n".join(f"  ⚠️ {w}" for w in (ai_prodaji.get("warnings") or []))
+    comparison_line = ai_prodaji.get("comparison") or dyn
+
+    msg1_parts = [
+        f"📊 <b>BILLZ Дайджест — {period}</b>",
+        "═══════════════════════",
+        "",
+        "💰 <b>КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ</b>",
+        f"• Выручка: <b>{revenue:,.0f} сум</b>  {dyn}",
+        f"• Заказов: {orders} | Ср. чек: {aov:,.0f} сум",
+        f"• Товаров: {items_sold:,.0f} ед",
+        pay_line,
+        "",
+        "📈 <b>ПРОДАЖИ</b>",
+        f"{ai_prodaji.get('summary', '—')}",
+        f"<i>Динамика: {comparison_line}</i>",
+    ]
+    if highlights:
+        msg1_parts += ["", highlights]
+    if warnings:
+        msg1_parts += ["", warnings]
+
+    # Топ-5 товаров
+    top = kpi.get("top10") or []
+    if top:
+        msg1_parts.append("\n🏆 <b>ТОП-5 ТОВАРОВ</b>")
+        for i, p in enumerate(top[:5], 1):
+            msg1_parts.append(f"  {i}. {p['name']}: {p['revenue']:,.0f} сум")
+
+    msg1 = "\n".join(msg1_parts)
+
+    # ── Сообщение 2: Закуп + Акции ──
+    ai_zakup = ai.get("zakup") or {}
+    ai_akcii = ai.get("akcii") or {}
+
+    msg2_parts = [
+        "📦 <b>ЗАКУП</b>",
+        f"{ai_zakup.get('summary', '—')}",
+    ]
+    for action in (ai_zakup.get("actions") or []):
+        msg2_parts.append(f"  → {action}")
+
+    msg2_parts += ["", "🎯 <b>АКЦИИ</b>"]
+    recommendations = ai_akcii.get("recommendations") or []
+    if recommendations:
+        for rec in recommendations[:4]:
+            title = rec.get("title", "—")
+            mech = rec.get("mechanics", "")
+            targets = ", ".join((rec.get("target_products") or [])[:3])
+            effect = rec.get("expected_effect", "")
+            msg2_parts.append(f"\n<b>{title}</b> [{mech}]")
+            if targets:
+                msg2_parts.append(f"  Товары: {targets}")
+            if effect:
+                msg2_parts.append(f"  Эффект: {effect}")
+    else:
+        msg2_parts.append("  Нет рекомендаций.")
+
+    # Каналы (если есть)
+    channels = kpi.get("channels") or {}
+    cc = channels.get("call_center") or {}
+    qf = channels.get("qayerdan") or {}
+    if cc or qf:
+        msg2_parts.append("\n📣 <b>КАНАЛЫ</b>")
+        if cc:
+            top_cc = list(cc.items())[:3]
+            msg2_parts.append("Колл-центр: " + " | ".join(f"{k}: {v}" for k, v in top_cc))
+        if qf:
+            top_qf = list(qf.items())[:3]
+            msg2_parts.append("Откуда: " + " | ".join(f"{k}: {v}" for k, v in top_qf))
+
+    msg2 = "\n".join(msg2_parts)
+
+    return [msg1, msg2]
