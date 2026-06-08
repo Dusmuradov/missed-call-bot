@@ -49,4 +49,5 @@ async def run(params: dict, context: dict) -> dict:
         "conversion_rate": conv,
         "work_hours_leads": metrics.get("work_hours", 0),
         "non_work_hours_leads": metrics.get("non_work_hours", 0),
+        "by_pipeline": metrics.get("by_pipeline", {}),
     }

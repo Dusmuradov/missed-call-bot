@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # pipeline_id → set of status_id которые считаются "необработанными"
 _unprocessed_cache: dict[int, set[int]] = {}
 
+# pipeline_id → название воронки
+_pipeline_names_cache: dict[int, str] = {}
+
 # user_id → имя сотрудника
 _users_cache: dict[int, str] = {}
 
@@ -45,6 +48,7 @@ async def _load_unprocessed_statuses(client: AmocrmClient) -> None:
                 if s.get("sort", 9999) <= min_sort and s.get("id")
             }
             _unprocessed_cache[pid] = unprocessed
+            _pipeline_names_cache[pid] = pl.get("name") or f"Pipeline {pid}"
             logger.debug(
                 "Pipeline %s '%s': unprocessed statuses = %s",
                 pid, pl.get("name"), unprocessed,
@@ -120,6 +124,7 @@ async def get_lead_metrics(
     non_work_hours = 0
     shifts: dict[str, int] = {name: 0 for name, _, _ in SHIFTS}
     seen_ids: set[int] = set()
+    by_pipeline: dict[int, dict] = defaultdict(lambda: {"total": 0, "unprocessed": 0})
 
     try:
         async for lead in client.get_leads(
@@ -135,8 +140,14 @@ async def get_lead_metrics(
             pipeline_id = lead.get("pipeline_id")
             status_id = lead.get("status_id")
 
-            if _is_unprocessed(pipeline_id, status_id):
+            is_unproc = _is_unprocessed(pipeline_id, status_id)
+            if is_unproc:
                 unprocessed += 1
+
+            if pipeline_id:
+                by_pipeline[pipeline_id]["total"] += 1
+                if is_unproc:
+                    by_pipeline[pipeline_id]["unprocessed"] += 1
 
             # Почасовое распределение + рабочее время + смены
             created_at_ts = lead.get("created_at")
@@ -162,17 +173,31 @@ async def get_lead_metrics(
         logger.error("AmoCRM leads fetch error: %s", exc)
         return {
             "total_leads": 0, "processed_leads": 0, "unprocessed_leads": 0,
-            "conversion_rate": 0.0, "hourly": {}, "error": str(exc)
+            "conversion_rate": 0.0, "hourly": {}, "by_pipeline": {}, "error": str(exc)
         }
 
     processed = total - unprocessed
     conv_rate = round(processed / total * 100, 1) if total > 0 else 0.0
+
+    # Строим читаемый по-pipeline словарь с именами воронок
+    pipelines_result = {}
+    for pid, counts in by_pipeline.items():
+        name = _pipeline_names_cache.get(pid) or f"Pipeline {pid}"
+        p_total = counts["total"]
+        p_unproc = counts["unprocessed"]
+        pipelines_result[name] = {
+            "total": p_total,
+            "unprocessed": p_unproc,
+            "processed": p_total - p_unproc,
+            "conversion_rate": round((p_total - p_unproc) / p_total * 100, 1) if p_total else 0.0,
+        }
 
     return {
         "total_leads": total,
         "processed_leads": processed,
         "unprocessed_leads": unprocessed,
         "conversion_rate": conv_rate,
+        "by_pipeline": pipelines_result,
         "hourly": dict(hourly),
         "work_hours": work_hours,
         "non_work_hours": non_work_hours,
