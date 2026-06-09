@@ -54,12 +54,16 @@ async def run(params: dict, context: dict) -> dict:
     # Velocity: среднедневной темп продаж за velocity_days
     vel_end = stock_date
     vel_start = str(date.fromisoformat(stock_date) - timedelta(days=velocity_days - 1))
+    velocity: dict[str, float] = {}
     try:
         prod_sales = await reports.get_product_sales(vel_start, vel_end)
-        # Делим суммарные продажи на количество дней → ед/день
+        if not prod_sales:
+            # Fallback: customer-purchases-table использует другую выборку и может вернуть данные
+            prod_sales = await reports.get_customer_purchases(vel_start, vel_end, with_customers=False)
         velocity = {
             r.get("product_name", ""): float(r.get("sold_measurement_value") or 0) / velocity_days
             for r in prod_sales
+            if r.get("product_name")
         }
     except Exception:
         velocity = {}

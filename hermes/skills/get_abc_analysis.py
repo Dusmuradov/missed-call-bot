@@ -43,11 +43,13 @@ async def run(params: dict, context: dict) -> dict:
 
     try:
         rows = await reports.get_product_sales(start, end)
+        if not rows:
+            rows = await reports.get_customer_purchases(start, end, with_customers=False)
     except Exception as exc:
         return {"error": str(exc)}
 
     if not rows:
-        return {"period": label, "message": "Нет данных"}
+        return {"period": label, "message": "Нет данных продаж в BILLZ за этот период"}
 
     # ABC по выручке
     products = []

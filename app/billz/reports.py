@@ -1,12 +1,26 @@
 """
-Обёртки над BILLZ API-эндпоинтами.
+BILLZ API wrappers — orders + all report endpoints.
 
-Подтверждённые эндпоинты (портированы из billz-sheets-integration/Code.gs):
-  GET /v3/order-search  — список заказов (пагинация, limit=50)
-  GET /v2/order/{id}    — полные детали заказа
+Order endpoints:
+  GET /v3/order-search                       — order list (paginated)
+  GET /v2/order/{id}                         — full order detail
 
-Заглушки (ждут спеки из BILLZ Notion):
-  get_stock(), get_imports(), get_suppliers(), get_promos()
+Report endpoints (source: Отчеты.pdf):
+  GET /v1/stock-report-table                 — current stock levels         → rows["rows"]
+  GET /v1/product-general-table              — product sales                → rows["rows"]
+  GET /v1/product-general-report             — product sales totals         → object
+  GET /v1/general-report                     — period summary totals        → object
+  GET /v1/general-report-table               — period table by day/week/month → rows["rows"]
+  GET /v1/transaction-report-table           — individual transactions      → rows["rows"]
+  GET /v1/report-product-performance-table   — product effectiveness        → rows["rows"]
+  GET /v1/import-report-table                — imports / purchases          → rows["rows"]
+  GET /v1/product-sells-by-suppliers-table   — sales by supplier            → rows["rows"]
+  GET /v1/supplier-order-return-report-table — order returns                → rows["rows"]
+  GET /v1/stocktaking-summary-table          — stocktaking results          → rows["rows"]
+  GET /v1/write-off-report-table             — write-offs                   → rows["Items"] (capital I)
+  GET /v1/seller-general-table               — seller performance           → rows["rows"]
+  GET /v1/customer-general-table             — customer analytics           → rows["rows"]
+  GET /v1/customer-purchases-table           — customer purchases per item  → rows["puchases"] (API typo)
 """
 from __future__ import annotations
 
@@ -18,24 +32,19 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_PAGE_LIMIT = 50  # максимум на страницу (как в Code.gs)
+_PAGE_LIMIT = 50
 
 
 # ---------------------------------------------------------------------------
-# Заказы (продажи)
+# Orders
 # ---------------------------------------------------------------------------
 
 async def iter_orders(start_date: str, end_date: str) -> AsyncIterator[dict]:
-    """
-    Async-генератор заказов за диапазон дат (формат yyyy-MM-dd).
-    Флаттенит orders_sorted_by_date_list[].orders.
-    Пропускает удалённые и не-SALE записи.
-    Порт логики fetchOrderList_ + syncBillzToSheets из Code.gs.
-    """
+    """Async generator of SALE orders for a date range (yyyy-MM-dd)."""
     from app.billz import client
 
     if not settings.billz_company_id:
-        logger.error("BILLZ_COMPANY_ID не задан — пропускаем iter_orders")
+        logger.error("BILLZ_COMPANY_ID not set — skipping iter_orders")
         return
 
     page = 1
@@ -69,17 +78,13 @@ async def iter_orders(start_date: str, end_date: str) -> AsyncIterator[dict]:
                 continue
             yield order
 
-        # Последняя страница если пришло меньше лимита
         if len(orders) < _PAGE_LIMIT:
             break
         page += 1
 
 
 async def get_order_detail(order_id: str) -> Optional[dict]:
-    """
-    GET /v2/order/{id} — полные детали заказа.
-    Порт fetchOrderDetail_() из Code.gs.
-    """
+    """GET /v2/order/{id} — full order detail."""
     from app.billz import client
     try:
         return await client.get(f"/v2/order/{order_id}")
@@ -89,14 +94,12 @@ async def get_order_detail(order_id: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Парсинг данных
+# Order parsing helpers
 # ---------------------------------------------------------------------------
 
 def parse_comment(comment: Optional[str]) -> dict[str, Optional[str]]:
-    """
-    Извлекает атрибуты канала из комментария заказа.
-    Порт parseComment_() из billz-sheets-integration/Code.gs.
-    Примеры: "Call center: Азиз | Qayerdan keldi: Instagram"
+    """Extract channel attributes from order comment.
+    Example: "Call center: Азиз | Qayerdan keldi: Instagram"
     """
     if not comment:
         return {"call_center": None, "qayerdan": None}
@@ -114,13 +117,9 @@ def parse_comment(comment: Optional[str]) -> dict[str, Optional[str]]:
 
 
 def parse_order_detail(detail: dict) -> dict:
-    """
-    Нормализует ответ GET /v2/order/{id} в плоский dict.
-    Порт buildRows_() из Code.gs — возвращает dict вместо Sheets-строки.
-    """
+    """Normalize GET /v2/order/{id} response into a flat dict."""
     od = detail.get("order_detail") or {}
 
-    # Итемы заказа
     items: list[dict] = []
     for item in (od.get("order_items") or []):
         product = item.get("product") or {}
@@ -136,7 +135,6 @@ def parse_order_detail(detail: dict) -> dict:
             "qty": float(item.get("measurement_value") or 0),
         })
 
-    # Оплата: split на наличные/карта (порт логики из Code.gs)
     cash = 0.0
     card = 0.0
     for pmt in (od.get("order_payments") or []):
@@ -147,7 +145,6 @@ def parse_order_detail(detail: dict) -> dict:
         else:
             card += amount
 
-    # Канальная атрибуция из комментария
     channel = parse_comment(od.get("comment"))
 
     return {
@@ -176,7 +173,7 @@ def parse_order_detail(detail: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Вспомогательная функция: базовые параметры отчётов
+# Report helpers
 # ---------------------------------------------------------------------------
 
 def _report_params(
@@ -187,10 +184,12 @@ def _report_params(
     limit: int = 1000,
     extra: Optional[dict] = None,
 ) -> dict:
-    """Собирает стандартный dict параметров для report-эндпоинтов."""
+    """Build standard query params for /v1/* report endpoints.
+
+    Note: company_id is intentionally excluded — it is not a documented
+    parameter for any report endpoint and may cause empty results.
+    """
     p: dict = {"page": page, "limit": limit, "currency": settings.billz_currency}
-    if settings.billz_company_id:
-        p["company_id"] = settings.billz_company_id
     if start_date:
         p["start_date"] = start_date
     if end_date:
@@ -204,166 +203,275 @@ def _report_params(
     return p
 
 
+async def _paginate(endpoint: str, base_params: dict, row_key: str = "rows") -> list[dict]:
+    """Fetch all pages from a paginated report endpoint."""
+    from app.billz import client
+
+    rows: list[dict] = []
+    page = 1
+    while True:
+        params = {**base_params, "page": page}
+        try:
+            body = await client.get(endpoint, params=params)
+        except Exception as exc:
+            logger.error("BILLZ %s page=%d failed: %s", endpoint, page, exc)
+            break
+
+        page_rows = body.get(row_key) or []
+        if not isinstance(page_rows, list):
+            logger.warning("BILLZ %s: unexpected %s type=%s keys=%s",
+                           endpoint, row_key, type(page_rows).__name__, list(body.keys()))
+            break
+        if not page_rows and page == 1:
+            logger.warning("BILLZ %s: empty page 1, response keys=%s", endpoint, list(body.keys()))
+
+        rows.extend(page_rows)
+        limit = base_params.get("limit", 1000)
+        if len(page_rows) < limit:
+            break
+        page += 1
+
+    logger.info("BILLZ %s: got %d rows", endpoint, len(rows))
+    return rows
+
+
 # ---------------------------------------------------------------------------
-# Остатки по товарам — GET /v1/stock-report-table
+# Stock
 # ---------------------------------------------------------------------------
 
 async def get_stock(report_date: str) -> list[dict]:
+    """GET /v1/stock-report-table — stock levels as of report_date (YYYY-MM-DD).
+
+    Key fields: product_name, product_sku, supplier_name, measurement_value,
+    retail_price, supply_price, estimated_income, estimated_margin, categories_path.
     """
-    Остатки на конец дня (report_date = YYYY-MM-DD).
-    Возвращает: [{product_name, product_sku, supplier_name, measurement_value,
-                  retail_price, supply_price, estimated_income, estimated_margin, ...}]
-    """
-    from app.billz import client
-    rows: list[dict] = []
-    page = 1
-    while True:
-        params = _report_params(report_date=report_date, page=page, limit=1000)
-        try:
-            body = await client.get("/v1/stock-report-table", params=params)
-        except Exception as exc:
-            logger.error("BILLZ stock-report-table page=%d failed: %s", page, exc)
-            break
-        page_rows = body.get("rows") or []
-        rows.extend(page_rows)
-        total = body.get("count") or 0
-        if len(rows) >= total or len(page_rows) == 0:
-            break
-        page += 1
-    logger.info("BILLZ: got %d stock rows for %s", len(rows), report_date)
+    params = _report_params(report_date=report_date, limit=1000)
+    params.pop("start_date", None)
+    params.pop("end_date", None)
+    rows = await _paginate("/v1/stock-report-table", params)
     return rows
 
 
 # ---------------------------------------------------------------------------
-# Продажи по товарам — GET /v1/product-general-table
+# Product sales
 # ---------------------------------------------------------------------------
 
 async def get_product_sales(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/product-general-table — product sales for a date range.
+
+    Key fields: product_name, product_sku, product_categories, product_brand_name,
+    sold_measurement_value, returned_measurement_value, gross_sales,
+    returned_sales_sum, net_profit, average_margin, discount.
     """
-    Продажи по товарам за диапазон дат.
-    Возвращает: [{product_name, product_sku, product_categories,
-                  sold_measurement_value, gross_sales, net_profit,
-                  average_margin, returned_measurement_value, ...}]
-    """
-    from app.billz import client
-    rows: list[dict] = []
-    page = 1
-    while True:
-        params = _report_params(start_date=start_date, end_date=end_date, page=page, limit=1000)
-        try:
-            body = await client.get("/v1/product-general-table", params=params)
-        except Exception as exc:
-            logger.error("BILLZ product-general-table page=%d failed: %s", page, exc)
-            break
-        # Пробуем разные структуры ответа
-        data_block = body.get("data") or {}
-        page_rows = (
-            body.get("rows")
-            or (data_block.get("rows") if isinstance(data_block, dict) else None)
-            or (data_block if isinstance(data_block, list) else None)
-            or body.get("data")
-            or []
-        )
-        if not isinstance(page_rows, list):
-            logger.warning(
-                "BILLZ product-general-table: unexpected response keys=%s page_rows type=%s",
-                list(body.keys()), type(page_rows).__name__,
-            )
-            break
-        if not page_rows and page == 1:
-            logger.warning(
-                "BILLZ product-general-table: empty page 1, response keys=%s",
-                list(body.keys()),
-            )
-        rows.extend(page_rows)
-        # Завершаем если данных меньше лимита
-        if len(page_rows) < 1000:
-            break
-        page += 1
-    logger.info("BILLZ: got %d product-sales rows for %s–%s", len(rows), start_date, end_date)
-    return rows
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/product-general-table", params)
 
 
-# ---------------------------------------------------------------------------
-# Сводный отчёт — GET /v1/general-report (итоги)
-# ---------------------------------------------------------------------------
+async def get_product_sales_summary(start_date: str, end_date: str) -> Optional[dict]:
+    """GET /v1/product-general-report — aggregated product sales totals (no pagination).
 
-async def get_summary(start_date: str, end_date: str) -> Optional[dict]:
-    """
-    Итоговые показатели за период (одна строка, не пагинированная).
-    Возвращает: {gross_sales, net_gross_sales, gross_profit, average_cheque,
-                 products_sold, transactions_count, average_extra_charge, ...}
+    Returns a single object with summary metrics.
     """
     from app.billz import client
     params = _report_params(start_date=start_date, end_date=end_date, limit=1)
     try:
-        body = await client.get("/v1/general-report", params=params)
-        return body
+        return await client.get("/v1/product-general-report", params=params)
+    except Exception as exc:
+        logger.error("BILLZ product-general-report failed: %s", exc)
+        return None
+
+
+async def get_customer_purchases(
+    start_date: str,
+    end_date: str,
+    with_customers: bool = False,
+) -> list[dict]:
+    """GET /v1/customer-purchases-table — purchases per product (alternative to product-general-table).
+
+    Use with_customers=False to include all purchases regardless of customer linkage.
+    NOTE: BILLZ API returns "puchases" key (missing 'r' — confirmed API typo in docs).
+
+    Key fields: product_name, sold_measurement_value, gross_sales, net_profit, average_margin.
+    """
+    params = _report_params(
+        start_date=start_date,
+        end_date=end_date,
+        limit=1000,
+        extra={"with_customers": "false" if not with_customers else "true"},
+    )
+    return await _paginate("/v1/customer-purchases-table", params, row_key="puchases")
+
+
+# ---------------------------------------------------------------------------
+# General sales summary
+# ---------------------------------------------------------------------------
+
+async def get_summary(start_date: str, end_date: str) -> Optional[dict]:
+    """GET /v1/general-report — period totals (not paginated).
+
+    Key fields: gross_sales, net_gross_sales, gross_profit, average_cheque,
+    products_sold, transactions_count, average_extra_charge.
+    """
+    from app.billz import client
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1)
+    try:
+        return await client.get("/v1/general-report", params=params)
     except Exception as exc:
         logger.error("BILLZ general-report failed: %s", exc)
         return None
 
 
+async def get_general_table(
+    start_date: str,
+    end_date: str,
+    detalization: str = "day",
+) -> list[dict]:
+    """GET /v1/general-report-table — sales broken down by day/week/month/year/all.
+
+    detalization: "day" | "week" | "month" | "year" | "all"
+    """
+    params = _report_params(
+        start_date=start_date,
+        end_date=end_date,
+        limit=1000,
+        extra={"detalization": detalization},
+    )
+    return await _paginate("/v1/general-report-table", params)
+
+
 # ---------------------------------------------------------------------------
-# Импорты — GET /v1/import-report-table
+# Transactions
+# ---------------------------------------------------------------------------
+
+async def get_transactions(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/transaction-report-table — individual transaction details.
+
+    Key fields: transaction_id, transaction_date, product_name, quantity,
+    price, total, payment_type, shop_name, seller_name.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    params.pop("currency", None)  # not listed for this endpoint
+    return await _paginate("/v1/transaction-report-table", params)
+
+
+# ---------------------------------------------------------------------------
+# Product performance (effectiveness)
+# ---------------------------------------------------------------------------
+
+async def get_product_performance(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/report-product-performance-table — stock movement analysis.
+
+    Shows beginning balance, received, sold, written-off, ending balance
+    for each product. Useful for turnover analysis.
+
+    Key fields: product_name, product_sku, opening_stock, closing_stock,
+    received_qty, sold_qty, written_off_qty.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/report-product-performance-table", params)
+
+
+# ---------------------------------------------------------------------------
+# Imports / purchases
 # ---------------------------------------------------------------------------
 
 async def get_imports(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/import-report-table — product import records.
+
+    Key fields: supplier_name, product_name, measurement_value, supply_price,
+    total_price, import_date.
     """
-    Импорты (поступления товаров) за период.
-    import_type=import — только импорты (не заказы поставщикам).
-    """
-    from app.billz import client
     params = _report_params(
-        start_date=start_date, end_date=end_date, limit=500,
+        start_date=start_date,
+        end_date=end_date,
+        limit=500,
         extra={"import_type": "import"},
     )
-    try:
-        body = await client.get("/v1/import-report-table", params=params)
-        return body.get("rows") or body.get("data") or []
-    except Exception as exc:
-        logger.error("BILLZ import-report-table failed: %s", exc)
-        return []
+    return await _paginate("/v1/import-report-table", params)
 
-
-# ---------------------------------------------------------------------------
-# Продажи по поставщикам — GET /v1/product-sells-by-suppliers-table
-# ---------------------------------------------------------------------------
 
 async def get_supplier_sales(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/product-sells-by-suppliers-table — sales breakdown by supplier.
+
+    Key fields: supplier_name, product_name, sold_measurement_value,
+    gross_sales, net_profit.
     """
-    Продажи с разбивкой по поставщикам за период.
-    Поля: supplier_name, product_name, sold_measurement_value, gross_sales, net_profit.
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/product-sells-by-suppliers-table", params)
+
+
+async def get_order_returns(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/supplier-order-return-report-table — returned supplier orders.
+
+    Key fields: supplier_name, product_name, returned_qty, total_cost, return_date.
     """
-    from app.billz import client
-    rows: list[dict] = []
-    page = 1
-    while True:
-        params = _report_params(start_date=start_date, end_date=end_date, page=page, limit=1000)
-        try:
-            body = await client.get("/v1/product-sells-by-suppliers-table", params=params)
-        except Exception as exc:
-            logger.error("BILLZ product-sells-by-suppliers-table page=%d failed: %s", page, exc)
-            break
-        page_rows = body.get("rows") or body.get("data") or []
-        if not isinstance(page_rows, list):
-            break
-        rows.extend(page_rows)
-        if len(page_rows) < 1000:
-            break
-        page += 1
-    logger.info("BILLZ: got %d supplier-sales rows for %s–%s", len(rows), start_date, end_date)
-    return rows
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/supplier-order-return-report-table", params)
 
 
 # ---------------------------------------------------------------------------
-# Акции — TODO (endpoint не найден в документации)
+# Stocktaking
+# ---------------------------------------------------------------------------
+
+async def get_stocktaking(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/stocktaking-summary-table — inventory count results.
+
+    Key fields: product_name, expected_qty, actual_qty, difference, shop_name.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/stocktaking-summary-table", params)
+
+
+# ---------------------------------------------------------------------------
+# Write-offs
+# ---------------------------------------------------------------------------
+
+async def get_write_offs(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/write-off-report-table — written-off products.
+
+    NOTE: BILLZ returns "Items" key (capital I) instead of "rows".
+
+    Key fields: product_name, product_sku, quantity, reason, write_off_date, shop_name.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/write-off-report-table", params, row_key="Items")
+
+
+# ---------------------------------------------------------------------------
+# Sellers
+# ---------------------------------------------------------------------------
+
+async def get_seller_stats(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/seller-general-table — seller performance metrics.
+
+    Key fields: seller_name, gross_sales, net_profit, transactions_count,
+    average_cheque, products_sold.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/seller-general-table", params)
+
+
+# ---------------------------------------------------------------------------
+# Customers
+# ---------------------------------------------------------------------------
+
+async def get_customer_stats(start_date: str, end_date: str) -> list[dict]:
+    """GET /v1/customer-general-table — customer analytics.
+
+    Key fields: customer_name, customer_phone, orders_count, total_spent,
+    average_cheque, last_order_date.
+    """
+    params = _report_params(start_date=start_date, end_date=end_date, limit=1000)
+    return await _paginate("/v1/customer-general-table", params)
+
+
+# ---------------------------------------------------------------------------
+# Legacy stub
 # ---------------------------------------------------------------------------
 
 async def get_promos() -> Optional[list[dict]]:
-    """
-    TODO: список активных акций.
-    Endpoint не найден в BILLZ Notion API docs (Отчеты.pdf).
-    Заглушка — блок Акции в дайджесте работает на основе AI-анализа продаж.
+    """Promo/discount list — not available in BILLZ report API (Отчеты.pdf).
+
+    The digest promo block is driven by AI analysis of stock + sales data.
     """
     return None

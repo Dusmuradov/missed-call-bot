@@ -1,14 +1,14 @@
 """
 Skill: debug_billz_fields
-Диагностика: показывает все поля из сырых ответов BILLZ API.
-Используется чтобы понять какие данные реально возвращает API.
+Diagnostics — shows raw fields and sample values from multiple BILLZ endpoints.
+Used to verify which endpoints return data for this company.
 """
 SCHEMA = {
     "name": "debug_billz_fields",
     "description": (
-        "Показывает все поля (ключи и примеры значений) из сырых ответов BILLZ API: "
-        "остатки (stock-report-table) и продажи по товарам (product-general-table). "
-        "Используй только если нужно проверить какие данные доступны из BILLZ."
+        "Диагностика BILLZ: проверяет какие эндпоинты возвращают данные и какие поля доступны. "
+        "Тестирует: остатки, продажи по товарам, покупки клиентов, продавцы, сводный отчёт. "
+        "Используй только для отладки и диагностики API."
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
@@ -22,42 +22,74 @@ async def run(params: dict, context: dict) -> dict:
     from app.config import settings
 
     if not settings.billz_secret or not settings.billz_company_id:
-        return {"error": "BILLZ не настроен"}
+        return {"error": "BILLZ не настроен (нет BILLZ_SECRET или BILLZ_COMPANY_ID)"}
 
     yesterday = str(date.today() - timedelta(days=1))
+    month_ago = str(date.today() - timedelta(days=30))
     result: dict = {}
 
-    # Один ряд из stock-report-table
-    try:
-        params_stock = _report_params(report_date=yesterday, page=1, limit=1)
-        body = await client.get("/v1/stock-report-table", params=params_stock)
-        rows = body.get("rows") or []
-        if rows:
-            row = rows[0]
-            result["stock_fields"] = {
-                k: (str(v)[:80] if v is not None else None)
-                for k, v in row.items()
-            }
-        else:
-            result["stock_fields"] = "нет строк"
-    except Exception as exc:
-        result["stock_fields"] = f"ошибка: {exc}"
+    async def probe(label: str, endpoint: str, params_fn, row_key: str = "rows"):
+        try:
+            body = await client.get(endpoint, params=params_fn())
+            rows = body.get(row_key) or []
+            if rows:
+                row = rows[0]
+                result[label] = {
+                    "status": f"OK — {len(rows)} строк",
+                    "fields": {k: (str(v)[:60] if v is not None else None) for k, v in row.items()},
+                }
+            else:
+                result[label] = {
+                    "status": "пусто (0 строк)",
+                    "response_keys": list(body.keys()),
+                    "raw_sample": {k: str(v)[:80] for k, v in list(body.items())[:5]},
+                }
+        except Exception as exc:
+            result[label] = {"status": f"ошибка: {exc}"}
 
-    # Один ряд из product-general-table
-    week_ago = str(date.today() - timedelta(days=7))
+    # stock-report-table
+    await probe(
+        "1_stock",
+        "/v1/stock-report-table",
+        lambda: _report_params(report_date=yesterday, page=1, limit=3),
+    )
+
+    # product-general-table (product sales)
+    await probe(
+        "2_product_sales",
+        "/v1/product-general-table",
+        lambda: _report_params(start_date=month_ago, end_date=yesterday, page=1, limit=3),
+    )
+
+    # customer-purchases-table (alternative product sales source, key="puchases")
+    await probe(
+        "3_customer_purchases",
+        "/v1/customer-purchases-table",
+        lambda: {
+            **_report_params(start_date=month_ago, end_date=yesterday, page=1, limit=3),
+            "with_customers": "false",
+        },
+        row_key="puchases",
+    )
+
+    # seller-general-table
+    await probe(
+        "4_sellers",
+        "/v1/seller-general-table",
+        lambda: _report_params(start_date=month_ago, end_date=yesterday, page=1, limit=3),
+    )
+
+    # general-report (summary totals)
     try:
-        params_sales = _report_params(start_date=week_ago, end_date=yesterday, page=1, limit=1)
-        body = await client.get("/v1/product-general-table", params=params_sales)
-        rows = body.get("rows") or body.get("data") or []
-        if rows:
-            row = rows[0]
-            result["product_sales_fields"] = {
-                k: (str(v)[:80] if v is not None else None)
-                for k, v in row.items()
-            }
-        else:
-            result["product_sales_fields"] = "нет строк"
+        body = await client.get(
+            "/v1/general-report",
+            params=_report_params(start_date=month_ago, end_date=yesterday, limit=1),
+        )
+        result["5_general_summary"] = {
+            "status": "OK",
+            "data": {k: str(v)[:80] for k, v in body.items()},
+        }
     except Exception as exc:
-        result["product_sales_fields"] = f"ошибка: {exc}"
+        result["5_general_summary"] = {"status": f"ошибка: {exc}"}
 
     return result
