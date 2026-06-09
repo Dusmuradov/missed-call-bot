@@ -10,3 +10,22 @@ dist/
 build/
 *.egg-info/
 .mypy_cache/
+
+# SQLite databases (runtime state — not source code)
+*.db
+*.sqlite
+*.sqlite3
+
+# Exported data files
+*.csv
+*.xlsx
+
+# One-off debug/test scripts in root
+check_*.py
+export_*.py
+test_*.py
+minimal_*.py
+
+# Logs
+*.log
+logs/
