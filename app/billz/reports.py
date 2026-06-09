@@ -203,6 +203,27 @@ def _report_params(
     return p
 
 
+def _unwrap(body: dict, row_key: str) -> list:
+    """Extract paginated rows from BILLZ response.
+
+    Some endpoints return {"rows": [...]} directly;
+    others wrap in {"code": 200, "data": {"rows": [...]}}.
+    """
+    direct = body.get(row_key)
+    if isinstance(direct, list):
+        return direct
+    # Try wrapped format: {"data": {"rows": [...]}} or {"data": [...]}
+    data = body.get("data")
+    if isinstance(data, dict):
+        wrapped = data.get(row_key)
+        if isinstance(wrapped, list):
+            return wrapped
+        # data itself might be the list (non-standard)
+    if isinstance(data, list):
+        return data
+    return []
+
+
 async def _paginate(endpoint: str, base_params: dict, row_key: str = "rows") -> list[dict]:
     """Fetch all pages from a paginated report endpoint."""
     from app.billz import client
@@ -217,11 +238,7 @@ async def _paginate(endpoint: str, base_params: dict, row_key: str = "rows") -> 
             logger.error("BILLZ %s page=%d failed: %s", endpoint, page, exc)
             break
 
-        page_rows = body.get(row_key) or []
-        if not isinstance(page_rows, list):
-            logger.warning("BILLZ %s: unexpected %s type=%s keys=%s",
-                           endpoint, row_key, type(page_rows).__name__, list(body.keys()))
-            break
+        page_rows = _unwrap(body, row_key)
         if not page_rows and page == 1:
             logger.warning("BILLZ %s: empty page 1, response keys=%s", endpoint, list(body.keys()))
 
@@ -275,7 +292,10 @@ async def get_product_sales_summary(start_date: str, end_date: str) -> Optional[
     from app.billz import client
     params = _report_params(start_date=start_date, end_date=end_date, limit=1)
     try:
-        return await client.get("/v1/product-general-report", params=params)
+        body = await client.get("/v1/product-general-report", params=params)
+        if isinstance(body.get("data"), dict):
+            body = body["data"]
+        return body
     except Exception as exc:
         logger.error("BILLZ product-general-report failed: %s", exc)
         return None
@@ -315,7 +335,13 @@ async def get_summary(start_date: str, end_date: str) -> Optional[dict]:
     from app.billz import client
     params = _report_params(start_date=start_date, end_date=end_date, limit=1)
     try:
-        return await client.get("/v1/general-report", params=params)
+        body = await client.get("/v1/general-report", params=params)
+        # Unwrap {"code": 200, "data": {...}} if present
+        if isinstance(body.get("data"), dict) and "gross_sales" not in body:
+            body = body["data"]
+        logger.debug("BILLZ general-report keys=%s gross_sales=%s",
+                     list(body.keys()), body.get("gross_sales"))
+        return body
     except Exception as exc:
         logger.error("BILLZ general-report failed: %s", exc)
         return None
