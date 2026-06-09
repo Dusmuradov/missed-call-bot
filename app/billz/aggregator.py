@@ -188,16 +188,26 @@ def aggregate_product_sales(rows: list[dict]) -> dict:
     products = []
     for row in rows:
         name = row.get("product_name") or "—"
+        sku = row.get("product_sku") or ""
+        cats = row.get("product_categories") or []
+        if isinstance(cats, list):
+            categories = ", ".join(str(c) for c in cats) if cats else "—"
+        else:
+            categories = str(cats) if cats else "—"
         gross = float(row.get("gross_sales") or 0)
         profit = float(row.get("net_profit") or 0)
         margin = float(row.get("average_margin") or 0)
         sold = float(row.get("sold_measurement_value") or 0)
         returned = float(row.get("returned_measurement_value") or 0)
         return_rate = round(returned / sold * 100, 1) if sold > 0 else 0.0
+        supply_cost = round(gross - profit, 2)
         products.append({
             "name": name,
+            "sku": sku,
+            "categories": categories,
             "gross_sales": round(gross, 2),
             "net_profit": round(profit, 2),
+            "supply_cost": supply_cost,
             "margin_pct": round(margin, 1),
             "sold_qty": round(sold, 2),
             "returned_qty": round(returned, 2),
@@ -327,22 +337,30 @@ def aggregate_stock(stock_rows: list[dict], velocity: dict[str, float]) -> dict:
         name = row.get("product_name") or "—"
         qty = float(row.get("measurement_value") or 0)
         retail_price = float(row.get("retail_price") or 0)
+        supply_price = float(row.get("supply_price") or 0)
         supplier = row.get("supplier_name") or "—"
         sku = row.get("product_sku") or ""
+        estimated_income = float(row.get("estimated_income") or 0)
+        estimated_margin = float(row.get("estimated_margin") or 0)
 
-        total_retail += qty * retail_price
+        retail_value = round(qty * retail_price, 2)
+        cost_value = round(qty * supply_price, 2)
+        total_retail += retail_value
 
-        vel = velocity.get(name, 0.0)  # units/period
-        # Переводим скорость в ед/день (предполагаем период = 1 день)
-        # В velocity уже хранится qty за период запроса (обычно 1 день)
+        vel = velocity.get(name, 0.0)  # ед/день (уже нормализовано вызывающим кодом)
         dos = (qty / vel) if vel > 0 else float("inf")
 
         item = {
             "name": name,
             "sku": sku,
+            "supplier": supplier,
             "qty": round(qty, 2),
             "retail_price": retail_price,
-            "supplier": supplier,
+            "supply_price": supply_price,
+            "retail_value": retail_value,
+            "cost_value": cost_value,
+            "estimated_income": round(estimated_income, 2),
+            "estimated_margin_pct": round(estimated_margin, 1),
             "velocity_per_day": round(vel, 2),
             "days_of_supply": round(dos, 1) if dos != float("inf") else None,
         }

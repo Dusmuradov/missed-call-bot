@@ -126,14 +126,35 @@ async def refresh_amocrm_token_job() -> None:
             pass
 
 
+async def _send_to_managers(text: str) -> None:
+    """Отправляет сообщение всем пользователям с ролью manager + администратору."""
+    from app.db import get_session
+    from app.repository import list_bot_users
+    from app.telegram import send_to_user
+
+    recipients: set[int] = set()
+    if settings.admin_user_id:
+        recipients.add(settings.admin_user_id)
+
+    try:
+        async with get_session() as session:
+            managers = await list_bot_users(session, role="manager")
+        for u in managers:
+            recipients.add(u.tg_user_id)
+    except Exception as exc:
+        logger.error("_send_to_managers: could not load manager list: %s", exc)
+
+    for uid in recipients:
+        await send_to_user(uid, text)
+
+
 async def daily_report_job() -> None:
-    """Ежедневный отчёт за вчерашний день — отправляется в группу в 09:00 по Ташкенту."""
+    """Ежедневный отчёт за вчерашний день — отправляется менеджерам и администратору в 09:00."""
     from app.analytics_utel import get_period_stats
     from app.amocrm.reports import get_lead_metrics_by_users
     from app.db import get_session
     from app.formatting import format_amocrm_users_report, format_daily_utel_report
     from app.periods import period_yesterday
-    from app.telegram import send_notification
 
     logger.info("Running daily report job…")
     from_utc, to_utc = period_yesterday()
@@ -162,8 +183,8 @@ async def daily_report_job() -> None:
         amo_text = "📋 <b>AmoCRM лиды — Вчера</b>\n⚠️ Ошибка получения данных"
 
     # Отправляем двумя сообщениями чтобы не превышать лимит 4096 символов
-    await send_notification(utel_text)
-    await send_notification(amo_text)
+    await _send_to_managers(utel_text)
+    await _send_to_managers(amo_text)
     logger.info("Daily report sent.")
 
 
@@ -203,7 +224,7 @@ async def hermes_morning_digest_job() -> None:
 
 async def billz_daily_digest_job() -> None:
     """
-    Ежедневный POS-дайджест из BILLZ — отправляется в группу в 09:05 по Ташкенту.
+    Ежедневный POS-дайджест из BILLZ — отправляется менеджерам и администратору в 09:05.
     Пайплайн: BILLZ API → aggregate → DeepSeek AI → Telegram.
     """
     from zoneinfo import ZoneInfo
@@ -214,7 +235,6 @@ async def billz_daily_digest_job() -> None:
     from app.db import get_session
     from app.formatting import build_billz_digest
     from app.repository import get_billz_snapshot, save_billz_snapshot
-    from app.telegram import send_notification
 
     logger.info("BILLZ daily digest job starting…")
     tz = ZoneInfo(settings.timezone)
@@ -250,7 +270,7 @@ async def billz_daily_digest_job() -> None:
         logger.info("BILLZ: fetched %d orders for %s", len(order_details), date_str)
     except Exception as exc:
         logger.error("BILLZ: order fetch failed: %s", exc)
-        await send_notification(
+        await _send_to_managers(
             f"📊 <b>BILLZ дайджест {period_label}</b>\n⚠️ Ошибка получения данных: {exc}"
         )
         return
@@ -325,7 +345,7 @@ async def billz_daily_digest_job() -> None:
     # Форматирование и отправка
     messages = build_billz_digest(kpi, ai_blocks)
     for msg in messages:
-        await send_notification(msg)
+        await _send_to_managers(msg)
 
     logger.info("BILLZ daily digest sent (%d messages).", len(messages))
 

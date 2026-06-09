@@ -230,3 +230,31 @@ COMPARE_FUNCS: dict[str, callable] = {
     "q2q": pair_q2q,
     "y2y": pair_y2y,
 }
+
+
+def resolve_period(params: dict, default: str = "yesterday") -> tuple[str, str, str]:
+    """
+    Возвращает (start_date, end_date, label) из параметров скилла.
+
+    Приоритет:
+    1. params["start_date"] + params["end_date"]  — произвольный диапазон (YYYY-MM-DD)
+    2. params["period"]  — именованный период из PERIOD_FUNCS
+    3. default  — запасной период если ничего не передано
+    """
+    start = params.get("start_date", "").strip()
+    end = params.get("end_date", "").strip()
+    if start and end:
+        return start, end, f"{start} – {end}"
+
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("Asia/Tashkent")
+    _UTC = timezone.utc
+
+    key = params.get("period", default)
+    if key not in PERIOD_FUNCS:
+        key = default
+
+    from_utc, to_utc = PERIOD_FUNCS[key]()
+    s = from_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
+    e = to_utc.replace(tzinfo=_UTC).astimezone(_TZ).strftime("%Y-%m-%d")
+    return s, e, PERIOD_LABELS.get(key, key)

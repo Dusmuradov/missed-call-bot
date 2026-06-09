@@ -59,7 +59,10 @@ async def start_polling() -> None:
     dp = get_dispatcher()
 
     # Удаляем webhook если был (Railway может оставить его после смены конфигурации)
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass  # ignore webhook errors on startup
 
     async def _run():
         try:
