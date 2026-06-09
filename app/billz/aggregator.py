@@ -340,7 +340,7 @@ def aggregate_stock(stock_rows: list[dict], velocity: dict[str, float]) -> dict:
         supply_price = float(row.get("supply_price") or 0)
         supplier = row.get("supplier_name") or "—"
         sku = row.get("product_sku") or ""
-        estimated_income = float(row.get("estimated_income") or 0)
+        category = row.get("categories_path") or "—"
         estimated_margin = float(row.get("estimated_margin") or 0)
 
         retail_value = round(qty * retail_price, 2)
@@ -354,12 +354,12 @@ def aggregate_stock(stock_rows: list[dict], velocity: dict[str, float]) -> dict:
             "name": name,
             "sku": sku,
             "supplier": supplier,
+            "category": category,
             "qty": round(qty, 2),
             "retail_price": retail_price,
             "supply_price": supply_price,
             "retail_value": retail_value,
             "cost_value": cost_value,
-            "estimated_income": round(estimated_income, 2),
             "estimated_margin_pct": round(estimated_margin, 1),
             "velocity_per_day": round(vel, 2),
             "days_of_supply": round(dos, 1) if dos != float("inf") else None,

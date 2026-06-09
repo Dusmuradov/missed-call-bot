@@ -189,6 +189,8 @@ def _report_params(
 ) -> dict:
     """Собирает стандартный dict параметров для report-эндпоинтов."""
     p: dict = {"page": page, "limit": limit, "currency": settings.billz_currency}
+    if settings.billz_company_id:
+        p["company_id"] = settings.billz_company_id
     if start_date:
         p["start_date"] = start_date
     if end_date:
