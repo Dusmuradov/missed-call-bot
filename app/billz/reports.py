@@ -253,11 +253,27 @@ async def get_product_sales(start_date: str, end_date: str) -> list[dict]:
         except Exception as exc:
             logger.error("BILLZ product-general-table page=%d failed: %s", page, exc)
             break
-        page_rows = body.get("rows") or body.get("data") or []
-        if isinstance(page_rows, list):
-            rows.extend(page_rows)
-        else:
+        # Пробуем разные структуры ответа
+        data_block = body.get("data") or {}
+        page_rows = (
+            body.get("rows")
+            or (data_block.get("rows") if isinstance(data_block, dict) else None)
+            or (data_block if isinstance(data_block, list) else None)
+            or body.get("data")
+            or []
+        )
+        if not isinstance(page_rows, list):
+            logger.warning(
+                "BILLZ product-general-table: unexpected response keys=%s page_rows type=%s",
+                list(body.keys()), type(page_rows).__name__,
+            )
             break
+        if not page_rows and page == 1:
+            logger.warning(
+                "BILLZ product-general-table: empty page 1, response keys=%s",
+                list(body.keys()),
+            )
+        rows.extend(page_rows)
         # Завершаем если данных меньше лимита
         if len(page_rows) < 1000:
             break
