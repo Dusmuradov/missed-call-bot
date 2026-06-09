@@ -183,6 +183,45 @@ async def amocrm_oauth_callback(code: str, state: str = "") -> dict:
 # BILLZ debug routes
 # ---------------------------------------------------------------------------
 
+@app.get("/admin/seed-users", tags=["meta"])
+async def seed_users() -> dict:
+    """
+    Восстанавливает известных пользователей в пустой БД после деплоя.
+    Идемпотентно: если пользователь уже есть — пропускает.
+    Доступен без авторизации — использовать только сразу после деплоя.
+    """
+    from app.db import get_session
+    from app.repository import create_pending_user, get_bot_user, set_user_role
+
+    SEED_USERS = [
+        {"tg_user_id": 633535801, "username": "azizdusmuradov", "full_name": "Aziz", "role": "admin"},
+        {"tg_user_id": 701287094, "username": "mr_rashidovs", "full_name": "Rashidov", "role": "manager"},
+        {"tg_user_id": 1322668592, "username": "Boburkhoja_Neo", "full_name": "Boburkhoja Neo", "role": "manager"},
+    ]
+
+    results = []
+    for u in SEED_USERS:
+        async with get_session() as session:
+            existing = await get_bot_user(session, u["tg_user_id"])
+            if existing is not None:
+                results.append({"tg_user_id": u["tg_user_id"], "status": "already_exists", "role": existing.role})
+                continue
+            await create_pending_user(
+                session,
+                tg_user_id=u["tg_user_id"],
+                username=u["username"],
+                full_name=u["full_name"],
+            )
+        async with get_session() as session:
+            await set_user_role(
+                session, u["tg_user_id"], u["role"],
+                approved_by=633535801,
+            )
+        results.append({"tg_user_id": u["tg_user_id"], "status": "created", "role": u["role"]})
+
+    return {"ok": True, "seeded": results}
+
+
 @app.get("/billz/run-daily", tags=["billz"])
 async def billz_run_daily() -> dict:
     """
