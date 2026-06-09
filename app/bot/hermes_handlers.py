@@ -12,6 +12,7 @@ from app.repository import get_bot_user
 
 logger = logging.getLogger(__name__)
 router = Router()
+router.message.filter(F.chat.type == "private")
 
 
 async def _get_user_with_amo(message: Message):
