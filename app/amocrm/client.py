@@ -82,7 +82,17 @@ class AmocrmClient:
                 data = await self._get("/leads", params=params)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 204:
-                    break  # нет данных
+                    break
+                if exc.response.status_code in (401, 403):
+                    logger.error(
+                        "AmoCRM token unauthorized (HTTP %d) — re-auth required",
+                        exc.response.status_code,
+                    )
+                    await _notify_admin_token_failed(
+                        f"HTTP {exc.response.status_code} при запросе лидов — "
+                        "токен недействителен, пройдите повторную авторизацию: /amocrm/oauth/start"
+                    )
+                    return
                 raise
 
             leads = data.get("_embedded", {}).get("leads", [])
@@ -92,7 +102,6 @@ class AmocrmClient:
             for lead in leads:
                 yield lead
 
-            # Проверяем есть ли следующая страница
             links = data.get("_links", {})
             if "next" not in links:
                 break
@@ -115,6 +124,16 @@ class AmocrmClient:
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 204:
                     break
+                if exc.response.status_code in (401, 403):
+                    logger.error(
+                        "AmoCRM token unauthorized (HTTP %d) — re-auth required",
+                        exc.response.status_code,
+                    )
+                    await _notify_admin_token_failed(
+                        f"HTTP {exc.response.status_code} при запросе активных лидов — "
+                        "токен недействителен, пройдите повторную авторизацию: /amocrm/oauth/start"
+                    )
+                    return
                 raise
 
             leads = data.get("_embedded", {}).get("leads", [])
