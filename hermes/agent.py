@@ -110,7 +110,9 @@ async def ask(tg_user_id: int, user_text: str, amocrm_user_id: int | None = None
     now_tashkent = _dt.now(zoneinfo.ZoneInfo("Asia/Tashkent"))
     _subdomain = _settings.amocrm_subdomain or "neocassica"
     time_ctx = (
-        f"\nТекущее время (Ташкент): {now_tashkent.strftime('%d.%m.%Y %H:%M')} (день недели: {now_tashkent.strftime('%A')})."
+        f"\nТекущее время (Ташкент, UTC+5): {now_tashkent.strftime('%d.%m.%Y %H:%M')} (день недели: {now_tashkent.strftime('%A')})."
+        f"\nСегодня по Ташкенту: {now_tashkent.strftime('%Y-%m-%d')}."
+        f"\nВСЕ даты и диапазоны (start_date, end_date, stock_date) вычисляй ТОЛЬКО по Ташкентскому времени (UTC+5). Никогда не используй UTC для расчёта дат."
         f"\nAmoCRM subdomain: {_subdomain} — все ссылки строй СТРОГО как https://{_subdomain}.amocrm.ru/leads/detail/{{id}}"
     )
 

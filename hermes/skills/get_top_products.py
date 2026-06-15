@@ -19,11 +19,11 @@ SCHEMA = {
             },
             "start_date": {
                 "type": "string",
-                "description": "Начало диапазона YYYY-MM-DD.",
+                "description": "Начало диапазона YYYY-MM-DD по Ташкенту (UTC+5). Вычисли относительно сегодняшней даты из системного промпта.",
             },
             "end_date": {
                 "type": "string",
-                "description": "Конец диапазона YYYY-MM-DD включительно.",
+                "description": "Конец диапазона YYYY-MM-DD по Ташкенту (UTC+5) включительно.",
             },
             "limit": {
                 "type": "integer",

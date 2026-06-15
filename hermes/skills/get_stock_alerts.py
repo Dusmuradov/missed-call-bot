@@ -22,7 +22,7 @@ SCHEMA = {
             },
             "stock_date": {
                 "type": "string",
-                "description": "Дата остатков YYYY-MM-DD. По умолчанию — вчера.",
+                "description": "Дата остатков YYYY-MM-DD по Ташкенту (UTC+5). По умолчанию — вчера по Ташкенту.",
             },
         },
         "required": [],
@@ -31,7 +31,9 @@ SCHEMA = {
 
 
 async def run(params: dict, context: dict) -> dict:
-    from datetime import date, timedelta
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
 
     from app.billz import aggregator as agg
     from app.billz import reports
@@ -40,7 +42,8 @@ async def run(params: dict, context: dict) -> dict:
     if not settings.billz_secret or not settings.billz_company_id:
         return {"error": "BILLZ не настроен"}
 
-    stock_date = params.get("stock_date", "").strip() or str(date.today() - timedelta(days=1))
+    _today_tashkent = datetime.now(ZoneInfo("Asia/Tashkent")).date()
+    stock_date = params.get("stock_date", "").strip() or str(_today_tashkent - timedelta(days=1))
     velocity_days = max(1, min(int(params.get("velocity_days") or 30), 365))
 
     try:
