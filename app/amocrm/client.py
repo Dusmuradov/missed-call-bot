@@ -74,7 +74,6 @@ class AmocrmClient:
                 "filter[created_at][to]": to_ts,
                 "limit": _PAGE_SIZE,
                 "page": page,
-                "with": "contacts",
             }
             if responsible_user_id:
                 params["filter[responsible_user_id][]"] = responsible_user_id
@@ -115,7 +114,6 @@ class AmocrmClient:
         while True:
             params = {
                 "filter[responsible_user_id][]": responsible_user_id,
-                "with": "contacts",
                 "limit": _PAGE_SIZE,
                 "page": page,
             }
