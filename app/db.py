@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -21,7 +20,8 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def _get_db_url() -> str:
-    url = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
+    from app.config import settings
+    url = settings.database_url or _DEFAULT_DB_URL
     # Railway даёт postgresql:// или postgres://, SQLAlchemy async требует postgresql+asyncpg://
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
