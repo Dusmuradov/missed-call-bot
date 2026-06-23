@@ -91,15 +91,15 @@ async def _send_to_managers(text: str) -> None:
 
 
 async def daily_report_job() -> None:
-    """Ежедневный отчёт за вчерашний день — отправляется менеджерам и администратору в 09:00."""
+    """Еженедельный отчёт за прошлую неделю — отправляется менеджерам каждый понедельник в 09:00."""
     from app.analytics_utel import get_period_stats
     from app.amocrm.reports import get_lead_metrics_by_users
     from app.db import get_session
     from app.formatting import format_amocrm_users_report, format_daily_utel_report
-    from app.periods import period_yesterday
+    from app.periods import period_last_week
 
-    logger.info("Running daily report job…")
-    from_utc, to_utc = period_yesterday()
+    logger.info("Running weekly report job…")
+    from_utc, to_utc = period_last_week()
     tz = settings.timezone
 
     # --- Utel отчёт ---
@@ -108,26 +108,26 @@ async def daily_report_job() -> None:
             utel_stats = await get_period_stats(session, from_utc, to_utc, tz_name=tz)
         utel_text = format_daily_utel_report(utel_stats, timezone_str=tz)
     except Exception as exc:
-        logger.error("Daily report: Utel stats failed: %s", exc)
-        utel_text = "📞 <b>Звонки Utel — Вчера</b>\n⚠️ Ошибка получения данных"
+        logger.error("Weekly report: Utel stats failed: %s", exc)
+        utel_text = "📞 <b>Звонки Utel — Прошлая неделя</b>\n⚠️ Ошибка получения данных"
 
     # --- AmoCRM отчёт ---
     try:
         amo_result = await get_lead_metrics_by_users(from_utc, to_utc, tz_name=tz)
         if amo_result.get("error"):
-            amo_text = f"📋 <b>AmoCRM лиды — Вчера</b>\n⚠️ {amo_result['error']}"
+            amo_text = f"📋 <b>AmoCRM лиды — Прошлая неделя</b>\n⚠️ {amo_result['error']}"
         else:
             amo_text = format_amocrm_users_report(
-                amo_result, "Вчера", from_utc=from_utc, to_utc=to_utc, timezone_str=tz
+                amo_result, "Прошлая неделя", from_utc=from_utc, to_utc=to_utc, timezone_str=tz
             )
     except Exception as exc:
-        logger.error("Daily report: AmoCRM stats failed: %s", exc)
-        amo_text = "📋 <b>AmoCRM лиды — Вчера</b>\n⚠️ Ошибка получения данных"
+        logger.error("Weekly report: AmoCRM stats failed: %s", exc)
+        amo_text = "📋 <b>AmoCRM лиды — Прошлая неделя</b>\n⚠️ Ошибка получения данных"
 
     # Отправляем двумя сообщениями чтобы не превышать лимит 4096 символов
     await _send_to_managers(utel_text)
     await _send_to_managers(amo_text)
-    logger.info("Daily report sent.")
+    logger.info("Weekly report sent.")
 
 
 async def hermes_morning_digest_job() -> None:
@@ -312,12 +312,12 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Ежедневный отчёт за вчера — каждый день в 09:00 по Ташкенту
+    # Еженедельный отчёт за прошлую неделю — каждый понедельник в 09:00 по Ташкенту
     _scheduler.add_job(
         daily_report_job,
-        trigger=CronTrigger(hour=9, minute=0, timezone="Asia/Tashkent"),
-        id="daily_report",
-        name="Daily yesterday report",
+        trigger=CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Asia/Tashkent"),
+        id="weekly_report",
+        name="Weekly last-week report",
         replace_existing=True,
     )
 
