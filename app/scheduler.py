@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -351,6 +352,54 @@ async def run_billz_digest_now() -> None:
     await billz_daily_digest_job()
 
 
+async def rop_daily_plan_job() -> None:
+    """
+    Ежедневный план P1/P2/P3 — каждый день в rop_plan_hour:15 (Asia/Tashkent).
+    Sellers → персональный план → send_to_user.
+    Managers + admin → командная сводка РОП → _send_to_managers.
+    """
+    if not settings.deepseek_api_key:
+        logger.debug("ROP plan skipped: DEEPSEEK_API_KEY not set.")
+        return
+    if not settings.amocrm_long_lived_token:
+        logger.debug("ROP plan skipped: AMOCRM_LONG_LIVED_TOKEN not set.")
+        return
+
+    try:
+        from app.db import get_session
+        from app.repository import list_bot_users
+        from app.telegram import send_to_user
+        from hermes.daily_plan import build_daily_plan
+        from hermes.rop_rollup import build_rop_rollup
+
+        async with get_session() as session:
+            all_users = await list_bot_users(session)
+
+        sellers = [u for u in all_users if u.amocrm_user_id and u.role == "seller"]
+        logger.info("ROP daily plan: %d sellers", len(sellers))
+
+        for user in sellers:
+            try:
+                text = await build_daily_plan(user.amocrm_user_id, user.tg_user_id)
+                await send_to_user(user.tg_user_id, text)
+            except Exception as exc:
+                logger.exception("ROP plan failed for user=%d: %s", user.tg_user_id, exc)
+
+        try:
+            rollup = await build_rop_rollup()
+            await _send_to_managers(rollup)
+        except Exception as exc:
+            logger.exception("ROP rollup failed: %s", exc)
+
+    except Exception as exc:
+        logger.exception("ROP daily plan job failed: %s", exc)
+
+
+async def run_rop_plan_now() -> None:
+    """Ручной запуск ROP-плана (для /rop/run-plan эндпоинта)."""
+    await rop_daily_plan_job()
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Создаёт и настраивает планировщик."""
     global _scheduler
@@ -382,6 +431,22 @@ def create_scheduler() -> AsyncIOScheduler:
         id="hermes_morning_digest",
         name="Hermes morning digest",
         replace_existing=True,
+    )
+
+    # ROP: ежедневный план P1/P2/P3 продавцам + сводка менеджерам
+    _scheduler.add_job(
+        rop_daily_plan_job,
+        trigger=CronTrigger(
+            hour=settings.rop_plan_hour, minute=15, timezone=settings.timezone
+        ),
+        id="rop_daily_plan",
+        name="ROP daily P1/P2/P3 plan",
+        replace_existing=True,
+    )
+    logger.info(
+        "ROP daily plan scheduled at %02d:15 %s",
+        settings.rop_plan_hour,
+        settings.timezone,
     )
 
     # BILLZ: ежедневный POS-дайджест в billz_digest_hour

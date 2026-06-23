@@ -155,6 +155,46 @@ async def cmd_client(message: Message) -> None:
         await wait.edit_text("Ошибка поиска.")
 
 
+@router.message(Command("plan"))
+@router.message(F.text == "📋 Мой план")
+async def cmd_plan(message: Message) -> None:
+    """Seller → личный план P1/P2/P3. Manager/admin → командная сводка РОП."""
+    tg_id = message.from_user.id
+    async with get_session() as session:
+        user = await get_bot_user(session, tg_id)
+
+    if user is None or not has_access(user.role, SELLER):
+        await message.answer("Нет доступа.")
+        return
+
+    from app.auth import MANAGER, ADMIN
+    is_lead = user.role in (MANAGER, ADMIN)
+
+    if is_lead:
+        wait = await message.answer("Собираю сводку по команде…")
+        try:
+            from hermes.rop_rollup import build_rop_rollup
+            text = await build_rop_rollup()
+            await wait.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception as exc:
+            logger.exception("cmd_plan rollup failed for user=%d: %s", tg_id, exc)
+            await wait.edit_text("Ошибка при формировании сводки. Попробуй позже.")
+        return
+
+    if not user.amocrm_user_id:
+        await message.answer("Твой аккаунт не привязан к AmoCRM. Обратись к администратору.")
+        return
+
+    wait = await message.answer("Формирую твой план на сегодня…")
+    try:
+        from hermes.daily_plan import build_daily_plan
+        text = await build_daily_plan(user.amocrm_user_id, tg_id)
+        await wait.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as exc:
+        logger.exception("cmd_plan failed for user=%d: %s", tg_id, exc)
+        await wait.edit_text("Ошибка при формировании плана. Попробуй позже.")
+
+
 @router.message(Command("newchat"))
 async def cmd_newchat(message: Message) -> None:
     """Очистить историю диалога с агентом."""

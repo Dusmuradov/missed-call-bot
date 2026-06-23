@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     hermes_digest_hour: int = 9       # час отправки утреннего дайджеста (локальный timezone)
     hermes_audit_ttl_hours: int = 4   # TTL кэша аудита в часах
+    rop_plan_hour: int = 9            # час отправки ежедневного ROP-плана P1/P2/P3
 
     def utel_to_amocrm(self) -> dict[str, int]:
         """Возвращает маппинг utel_ext → amocrm_user_id из UTEL_AMOCRM_MAP."""

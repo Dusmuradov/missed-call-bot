@@ -18,6 +18,7 @@ def main_reply_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
     if role == SELLER:
         return ReplyKeyboardMarkup(
             keyboard=[
+                [KeyboardButton(text="📋 Мой план")],
                 [KeyboardButton(text="📞 Мои звонки"), KeyboardButton(text="🔴 Мои пропущенные")],
                 [KeyboardButton(text="📋 Мои лиды AmoCRM")],
             ],

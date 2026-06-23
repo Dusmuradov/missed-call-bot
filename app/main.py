@@ -190,6 +190,22 @@ async def seed_users() -> dict:
     return {"ok": True, "seeded": results}
 
 
+@app.get("/rop/run-plan", tags=["rop"])
+async def rop_run_plan() -> dict:
+    """
+    Ручной запуск ROP-плана: sellers получат личный план P1/P2/P3,
+    managers/admin — командную сводку.
+    """
+    if not settings.amocrm_long_lived_token:
+        return {"error": "AMOCRM_LONG_LIVED_TOKEN не задан"}
+    if not settings.deepseek_api_key:
+        return {"error": "DEEPSEEK_API_KEY не задан"}
+    import asyncio
+    from app.scheduler import run_rop_plan_now
+    asyncio.create_task(run_rop_plan_now())
+    return {"ok": True, "message": "ROP план запущен в фоне — проверьте Telegram"}
+
+
 @app.get("/billz/run-daily", tags=["billz"])
 async def billz_run_daily() -> dict:
     """

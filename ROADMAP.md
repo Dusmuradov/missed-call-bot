@@ -52,6 +52,56 @@
 
 ---
 
+### [x] Stage 1 — ROP error/mistake analysis engine ✅
+
+**Файл:** `hermes/rop_errors.py`
+
+`DealError(severity, code, message, recommendation)` + `async detect_errors(deal, tasks=None, notes=None)`.
+8 кодов ошибок: `no_task`, `overdue_task`, `stale_hot`, `stale_warm`, `cold_high_value`,
+`stuck_initial`, `unanswered_objection`, `no_contact`. Передача `tasks=None` или `notes=None`
+пропускает соответствующие проверки (используется в team roll-up для экономии API-вызовов).
+
+---
+
+### [x] Stage 2 — Daily prioritized task plan ✅
+
+**Файл:** `hermes/daily_plan.py`
+
+`build_daily_plan(amocrm_user_id, tg_user_id) -> str` — возвращает Telegram HTML с планом P1/P2/P3.
+Логика: `run_audit` → fetch tasks/notes per deal → `detect_errors` → группировка P1(critical/hot) /
+P2(warning/warm stale) / P3(остальные) → форматирование.
+
+---
+
+### [x] Stage 3 — РОП team roll-up ✅
+
+**Файл:** `hermes/rop_rollup.py`
+
+`build_rop_rollup() -> str` — team-wide сводка для менеджера/admin. Итерирует всех пользователей
+с `amocrm_user_id`, вызывает `run_audit` (кэш 4h) + `detect_errors` без tasks/notes, агрегирует
+critical/warning counts per seller, выводит worst performer с рекомендацией.
+
+---
+
+### [x] Stage 4 — Scheduling + delivery ✅
+
+- `app/scheduler.py`: добавлен `rop_daily_plan_job()` — sellers получают личный план,
+  managers/admin — team rollup. Регистрируется как `id="rop_daily_plan"` в `09:15 Asia/Tashkent`.
+- `app/config.py`: добавлен `rop_plan_hour: int = 9`.
+- `.env.example`: добавлен `ROP_PLAN_HOUR=9`.
+- Также добавлен `run_rop_plan_now()` для ручного запуска.
+
+---
+
+### [x] Stage 5 — Bot commands + menu + HTTP trigger ✅
+
+- `app/bot/hermes_handlers.py`: команда `/plan` + обработчик кнопки `📋 Мой план`.
+  Seller → `build_daily_plan`. Manager/admin → `build_rop_rollup`.
+- `app/bot/menu.py`: кнопка `📋 Мой план` добавлена в `main_reply_keyboard` для seller.
+- `app/main.py`: маршрут `GET /rop/run-plan` → запускает `run_rop_plan_now()` в фоне.
+
+---
+
 ### [x] Stage 0 — Foundations (ВЫПОЛНЕНО)
 
 Всё уже на GitHub в ветке `main`.
@@ -69,7 +119,7 @@
 
 ---
 
-### [ ] Stage 1 — ROP error/mistake analysis engine
+### [x] Stage 1 — ROP error/mistake analysis engine ✅ (see Progress table below)
 
 **Цель:** для каждой активной сделки продавца — обнаружить типовые ошибки продажного процесса
 по методологии РОП, уже заложенной в `hermes/skills/`.
@@ -333,10 +383,10 @@ async def rop_run_plan():
 | Этап | Статус | Коммит |
 |---|---|---|
 | Stage 0 — Foundations | ✅ DONE | `32a8fe3` |
-| Stage 1 — Error analysis | ⏳ TODO | — |
-| Stage 2 — Daily plan | ⏳ TODO | — |
-| Stage 3 — Team roll-up | ⏳ TODO | — |
-| Stage 4 — Scheduling | ⏳ TODO | — |
-| Stage 5 — Bot commands | ⏳ TODO | — |
+| Stage 1 — Error analysis | ✅ DONE | see below |
+| Stage 2 — Daily plan | ✅ DONE | see below |
+| Stage 3 — Team roll-up | ✅ DONE | see below |
+| Stage 4 — Scheduling | ✅ DONE | see below |
+| Stage 5 — Bot commands | ✅ DONE | see below |
 | Stage 6 — Tests | ⏳ TODO | — |
 | Stage 7 — CRM write | 🔒 Deferred | — |
