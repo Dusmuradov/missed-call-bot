@@ -4,7 +4,7 @@ APScheduler: периодические задачи.
 Джобы:
   - check_callback_escalations: каждые N минут проверяет пропущенные звонки
     без перезвона и отправляет эскалации в Telegram.
-  - refresh_amocrm_token: каждые 6 часов проверяет и обновляет токен AmoCRM.
+  - weekly_report_job: каждый понедельник в 09:00 — AI-дайджест за прошлую неделю.
 """
 from __future__ import annotations
 
@@ -91,43 +91,97 @@ async def _send_to_managers(text: str) -> None:
 
 
 async def daily_report_job() -> None:
-    """Еженедельный отчёт за прошлую неделю — отправляется менеджерам каждый понедельник в 09:00."""
-    from app.analytics_utel import get_period_stats
+    """
+    Еженедельный AI-дайджест — каждый понедельник в 09:00.
+    Данные: BILLZ (продажи + остатки) + AmoCRM (лиды по менеджерам) + Utel (звонки).
+    AI анализирует всё вместе и выдаёт план + рекомендации на текущую неделю.
+    """
+    from zoneinfo import ZoneInfo
+
     from app.amocrm.reports import get_lead_metrics_by_users
+    from app.analytics_utel import get_period_stats
+    from app.billz import aggregator as agg
+    from app.billz import reports as billz_reports
+    from app.billz.weekly_ai import analyze_weekly, format_weekly_digest
     from app.db import get_session
-    from app.formatting import format_amocrm_users_report, format_daily_utel_report
     from app.periods import period_last_week
 
-    logger.info("Running weekly report job…")
+    logger.info("Running weekly AI digest…")
     from_utc, to_utc = period_last_week()
-    tz = settings.timezone
+    tz_name = settings.timezone
+    tz = ZoneInfo(tz_name)
 
-    # --- Utel отчёт ---
+    from_local = from_utc.replace(tzinfo=__import__("datetime").timezone.utc).astimezone(tz)
+    to_local   = to_utc.replace(tzinfo=__import__("datetime").timezone.utc).astimezone(tz)
+    period_label = f"{from_local.strftime('%d.%m')} – {to_local.strftime('%d.%m.%Y')}"
+
+    date_from = from_local.strftime("%Y-%m-%d")
+    date_to   = to_local.strftime("%Y-%m-%d")
+
+    # ── 1. BILLZ данные ──
+    billz_kpi: dict | None = None
+    if settings.billz_secret and settings.billz_company_id:
+        try:
+            order_details: list[dict] = []
+            async for order in billz_reports.iter_orders(date_from, date_to):
+                detail = await billz_reports.get_order_detail(order["id"])
+                if detail:
+                    order_details.append(billz_reports.parse_order_detail(detail))
+
+            billz_kpi = agg.aggregate(order_details, period_label=period_label)
+
+            stock_res, imports_res, prod_sales_res = await asyncio.gather(
+                billz_reports.get_stock(date_to),
+                billz_reports.get_imports(date_from, date_to),
+                billz_reports.get_product_sales(date_from, date_to),
+                return_exceptions=True,
+            )
+            if not isinstance(stock_res, Exception) and stock_res:
+                billz_kpi["stock"] = agg.aggregate_stock(stock_res, billz_kpi.get("velocity") or {})
+            if not isinstance(imports_res, Exception):
+                billz_kpi["imports"] = agg.aggregate_imports(imports_res or [])
+            if not isinstance(prod_sales_res, Exception):
+                billz_kpi["product_sales"] = agg.aggregate_product_sales(prod_sales_res or [])
+
+            logger.info("BILLZ weekly: %d orders for %s–%s", len(order_details), date_from, date_to)
+        except Exception as exc:
+            logger.error("BILLZ weekly data failed: %s", exc)
+
+    # ── 2. AmoCRM лиды ──
+    amo_data: dict | None = None
+    try:
+        amo_data = await get_lead_metrics_by_users(from_utc, to_utc, tz_name=tz_name)
+    except Exception as exc:
+        logger.error("AmoCRM weekly data failed: %s", exc)
+
+    # ── 3. Utel звонки ──
+    utel_flat: dict | None = None
     try:
         async with get_session() as session:
-            utel_stats = await get_period_stats(session, from_utc, to_utc, tz_name=tz)
-        utel_text = format_daily_utel_report(utel_stats, timezone_str=tz)
+            stats = await get_period_stats(session, from_utc, to_utc, tz_name=tz_name)
+        total = stats.get("total", 0)
+        incoming = stats.get("incoming", 0)
+        missed = stats.get("missed", 0)
+        outgoing = stats.get("outgoing", 0)
+        utel_flat = {
+            "total": total,
+            "incoming": incoming,
+            "missed": missed,
+            "outgoing": outgoing,
+            "missed_rate": round(missed / incoming * 100, 1) if incoming else 0,
+        }
     except Exception as exc:
-        logger.error("Weekly report: Utel stats failed: %s", exc)
-        utel_text = "📞 <b>Звонки Utel — Прошлая неделя</b>\n⚠️ Ошибка получения данных"
+        logger.error("Utel weekly data failed: %s", exc)
 
-    # --- AmoCRM отчёт ---
-    try:
-        amo_result = await get_lead_metrics_by_users(from_utc, to_utc, tz_name=tz)
-        if amo_result.get("error"):
-            amo_text = f"📋 <b>AmoCRM лиды — Прошлая неделя</b>\n⚠️ {amo_result['error']}"
-        else:
-            amo_text = format_amocrm_users_report(
-                amo_result, "Прошлая неделя", from_utc=from_utc, to_utc=to_utc, timezone_str=tz
-            )
-    except Exception as exc:
-        logger.error("Weekly report: AmoCRM stats failed: %s", exc)
-        amo_text = "📋 <b>AmoCRM лиды — Прошлая неделя</b>\n⚠️ Ошибка получения данных"
+    # ── 4. AI-анализ ──
+    ai_result = await analyze_weekly(period_label, billz_kpi, amo_data, utel_flat)
 
-    # Отправляем двумя сообщениями чтобы не превышать лимит 4096 символов
-    await _send_to_managers(utel_text)
-    await _send_to_managers(amo_text)
-    logger.info("Weekly report sent.")
+    # ── 5. Форматирование и отправка ──
+    messages = format_weekly_digest(ai_result, period_label)
+    for msg in messages:
+        await _send_to_managers(msg)
+
+    logger.info("Weekly AI digest sent (%d messages).", len(messages))
 
 
 async def hermes_morning_digest_job() -> None:
