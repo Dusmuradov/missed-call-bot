@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AmocrmToken, BillzSnapshot, BillzToken, BotUser, Call, MissedTracking
+from app.models import AmocrmToken, BillzSnapshot, BillzToken, BotUser, Call, CrmToken, MissedTracking
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +319,35 @@ async def upsert_billz_token(
     row.access_token = access_token
     row.refresh_token = refresh_token
     row.expires_at = expires_at
+    await session.flush()
+    return row
+
+
+# ---------------------------------------------------------------------------
+# CrmToken
+# ---------------------------------------------------------------------------
+
+async def get_crm_token(session: AsyncSession) -> Optional[CrmToken]:
+    result = await session.execute(select(CrmToken).where(CrmToken.id == 1))
+    return result.scalar_one_or_none()
+
+
+async def upsert_crm_token(
+    session: AsyncSession,
+    *,
+    access_token: str,
+    m2m_token: Optional[str] = None,
+    m2m_expires_at: Optional[datetime] = None,
+) -> CrmToken:
+    row = await get_crm_token(session)
+    if row is None:
+        row = CrmToken(id=1)
+        session.add(row)
+    row.access_token = access_token
+    if m2m_token is not None:
+        row.m2m_token = m2m_token
+    if m2m_expires_at is not None:
+        row.m2m_expires_at = m2m_expires_at
     await session.flush()
     return row
 

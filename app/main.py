@@ -92,7 +92,24 @@ async def debug_config() -> dict:
         "billz_company_id": bool(settings.billz_company_id),
         "bot_token": bool(settings.bot_token),
         "telegram_chat_id": bool(settings.telegram_chat_id),
+        "crm_base_url": settings.crm_base_url or "(not set)",
+        "crm_username": bool(settings.crm_username),
+        "crm_password": bool(settings.crm_password),
     }
+
+
+@app.get("/crm/auth/test", tags=["crm"])
+async def crm_auth_test() -> dict:
+    """Тестирует CRM авторизацию: login → access_token → M2M token."""
+    if not settings.crm_base_url:
+        return {"error": "CRM_BASE_URL не задан в .env"}
+    try:
+        from app.crm.client import get_valid_m2m_token
+        m2m = await get_valid_m2m_token()
+        return {"ok": True, "m2m_token_prefix": m2m[:12] + "…"}
+    except Exception as exc:
+        logger.error("CRM auth test failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/amocrm/users", tags=["amocrm"])

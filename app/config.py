@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # Если пустой — используется первый статус из API /leads/pipelines.
     amocrm_initial_status_id: int = 0
 
+    # --- CRM (username/password → access_token → M2M token) ---
+    crm_base_url: str = ""
+    crm_username: str = ""
+    crm_password: str = ""
+    # Путь для POST username+password → access_token
+    crm_login_path: str = "/api/auth/login"
+    # Путь для POST access_token → m2m_token
+    crm_m2m_path: str = "/api/auth/m2m"
+
     # --- BILLZ POS ---
     billz_api_url: str = "https://api-admin.billz.ai"
     billz_secret: str = ""

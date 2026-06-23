@@ -160,6 +160,20 @@ class BillzToken(Base):
     )
 
 
+class CrmToken(Base):
+    """Одна строка — токены CRM (один аккаунт). access_token + m2m_token."""
+
+    __tablename__ = "crm_token"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    m2m_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    m2m_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class BillzSnapshot(Base):
     """
     Ежедневный снимок KPI из BILLZ.
