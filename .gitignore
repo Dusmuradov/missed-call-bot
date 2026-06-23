@@ -23,7 +23,7 @@ build/
 # One-off debug/test scripts in root
 check_*.py
 export_*.py
-test_*.py
+/test_*.py
 minimal_*.py
 
 # Logs

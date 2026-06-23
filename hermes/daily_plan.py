@@ -21,21 +21,8 @@ _HIGH_VALUE = 500_000
 async def build_daily_plan(amocrm_user_id: int, tg_user_id: int) -> str:
     """Return a Telegram HTML string with the seller's P1/P2/P3 plan for today."""
     from app.amocrm.client import get_valid_client
-    from hermes.skills.loader import load_skills
 
-    load_skills()
-    context: dict = {}
-    try:
-        from hermes.llm import get_llm_client
-        context = {
-            "llm": get_llm_client(),
-            "amocrm_user_id": amocrm_user_id,
-            "tg_user_id": tg_user_id,
-        }
-    except RuntimeError:
-        pass
-
-    deals = await run_audit(amocrm_user_id, tg_user_id, with_suggestions=True)
+    deals = await run_audit(amocrm_user_id, tg_user_id, with_suggestions=False)
     if not deals:
         return (
             "📋 <b>Твой план на сегодня</b>\n\n"
@@ -55,8 +42,8 @@ async def build_daily_plan(amocrm_user_id: int, tg_user_id: int) -> str:
                 )
                 tasks = t if not isinstance(t, Exception) else []
                 notes = n if not isinstance(n, Exception) else []
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("daily_plan: could not fetch tasks/notes for lead=%d: %s", deal.lead_id, exc)
         errors = await detect_errors(deal, tasks, notes)
         return deal, errors
 
@@ -76,6 +63,14 @@ async def build_daily_plan(amocrm_user_id: int, tg_user_id: int) -> str:
             p2.append((deal, errors))
         elif deal.heat == "warm" or (deal.heat == "cold" and deal.lead_price >= _HIGH_VALUE):
             p3.append((deal, errors))
+
+    suggestions = await asyncio.gather(
+        *[_suggest_p1_next_step(deal, errors) for deal, errors in p1],
+        return_exceptions=True,
+    )
+    for (deal, _errors), suggestion in zip(p1, suggestions):
+        if not isinstance(suggestion, Exception) and suggestion:
+            deal.next_step = suggestion
 
     lines = ["📋 <b>Твой план на сегодня</b>\n"]
 
@@ -112,6 +107,38 @@ async def build_daily_plan(amocrm_user_id: int, tg_user_id: int) -> str:
 
 def _fmt_price(price: float) -> str:
     return f"{price:,.0f}₽".replace(",", " ") if price else "—"
+
+
+async def _suggest_p1_next_step(deal: DealAnalysis, errors: list[DealError]) -> str:
+    try:
+        from hermes.llm import get_llm_client
+        from hermes.skills.loader import call_skill
+
+        result = await call_skill(
+            "suggest_next_step",
+            {
+                "lead_name": deal.lead_name,
+                "heat": deal.heat,
+                "sentiment": "neutral",
+                "status_name": deal.status_name,
+                "client_objections": [
+                    error.message for error in errors if error.code == "unanswered_objection"
+                ],
+            },
+            {"llm": get_llm_client()},
+        )
+    except Exception:
+        return deal.next_step
+
+    action = (result.get("action") or "").strip()
+    script = (result.get("script") or "").strip()
+    urgency = (result.get("urgency") or "").strip()
+    if action and script:
+        prefix = action.capitalize()
+        if urgency:
+            prefix += f" ({urgency})"
+        return f"{prefix}: {script}"
+    return script or action or deal.next_step
 
 
 def _format_item(
