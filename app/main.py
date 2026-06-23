@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # timezone used in webhook handler
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request, status
@@ -145,55 +145,6 @@ async def amocrm_pipelines() -> dict:
         })
     return {"pipelines": result}
 
-
-@app.get("/amocrm/oauth/start", tags=["amocrm"])
-async def amocrm_oauth_start() -> dict:
-    """Возвращает ссылку для OAuth-авторизации AmoCRM."""
-    if not settings.amocrm_subdomain:
-        return {"error": "AMOCRM_SUBDOMAIN not configured"}
-
-    import secrets
-    state = secrets.token_urlsafe(16)
-    url = (
-        f"https://www.amocrm.ru/oauth"
-        f"?client_id={settings.amocrm_client_id}"
-        f"&state={state}"
-        f"&redirect_uri={settings.amocrm_redirect_uri}"
-        f"&response_type=code"
-        f"&mode=redirect"
-    )
-    return {"oauth_url": url, "state": state}
-
-
-@app.get("/amocrm/oauth/callback", tags=["amocrm"])
-async def amocrm_oauth_callback(code: str, state: str = "") -> dict:
-    """Обменивает OAuth-код на токены и сохраняет в БД."""
-    from datetime import timedelta
-
-    from app.amocrm.client import exchange_code
-    from app.db import get_session
-    from app.repository import upsert_amocrm_token
-
-    try:
-        tokens = await exchange_code(code)
-    except Exception as exc:
-        logger.error("AmoCRM OAuth exchange failed: %s", exc)
-        return {"error": str(exc)}
-
-    expires_in = tokens.get("expires_in", 86400)
-    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
-
-    async with get_session() as session:
-        await upsert_amocrm_token(
-            session,
-            subdomain=settings.amocrm_subdomain,
-            access_token=tokens["access_token"],
-            refresh_token=tokens["refresh_token"],
-            expires_at=expires_at,
-        )
-
-    logger.info("AmoCRM tokens saved for subdomain=%s", settings.amocrm_subdomain)
-    return {"ok": True, "subdomain": settings.amocrm_subdomain}
 
 
 # ---------------------------------------------------------------------------
