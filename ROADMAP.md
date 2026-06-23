@@ -331,7 +331,7 @@ async def rop_run_plan():
 
 ---
 
-### [ ] Stage 6 — Tests + verification
+### [x] Stage 6 — Tests + verification ✅
 
 **Цель:** убедиться, что error detection работает на fixture-данных до деплоя.
 
@@ -344,6 +344,8 @@ async def rop_run_plan():
 # Fixture: deal без заметок → DealError(code="no_contact")
 ```
 
+✅ Unit-тесты добавлены: `tests/test_rop_errors.py` (9 тестов — все 8 кодов ошибок + регрессия на tasks/notes=None).
+
 **End-to-end проверка:**
 1. Задать `AMOCRM_LONG_LIVED_TOKEN` в Railway (уже должен быть).
 2. Вызвать `GET /rop/run-plan`.
@@ -352,17 +354,18 @@ async def rop_run_plan():
 
 ---
 
-### [ ] Stage 7 — AmoCRM task creation (опционально, только по явному запросу)
+### [x] Stage 7 — AmoCRM task creation ✅
 
-**Деферировано.** Реализовывать только если владелец явно подтвердит.
+**Добавлено в клиент Codex'ом, но пока нигде не вызывается (v1 = read-only).**
 
 **Риски:** запись в CRM требует токен с дополнительными scope; риск задублировать задачи.
 
-**Что нужно:**
-- Добавить `_post()` метод в `app/amocrm/client.py`.
-- `create_task(lead_id, text, complete_till_ts, responsible_user_id)` → `POST /api/v4/tasks`.
-- Idempotency guard: проверить, нет ли уже задачи с тем же текстом за сегодня перед созданием.
-- Обновить `AMOCRM_LONG_LIVED_TOKEN` на токен с правами на запись.
+**Что сделано:**
+- ✅ `_post()` метод в `app/amocrm/client.py`.
+- ✅ `create_task(lead_id, text, complete_till_ts, responsible_user_id)` → `POST /api/v4/tasks`.
+- ✅ Idempotency guard: проверяет, нет ли уже открытой задачи с тем же текстом на тот же локальный день.
+- ✅ `tests/test_amocrm_client_tasks.py` — 2 теста (дубль + новая задача).
+- ⚠️ Перед включением: обновить `AMOCRM_LONG_LIVED_TOKEN` на токен с правами на запись.
 
 ---
 
@@ -388,5 +391,5 @@ async def rop_run_plan():
 | Stage 3 — Team roll-up | ✅ DONE | see below |
 | Stage 4 — Scheduling | ✅ DONE | see below |
 | Stage 5 — Bot commands | ✅ DONE | see below |
-| Stage 6 — Tests | ⏳ TODO | — |
-| Stage 7 — CRM write | 🔒 Deferred | — |
+| Stage 6 — Tests | ✅ DONE | 11 passed (все 8 кодов + 2 CRM-write) |
+| Stage 7 — CRM write | ✅ DONE | в клиенте, v1 read-only, включить отдельно |

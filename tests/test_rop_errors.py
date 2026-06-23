@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -84,3 +85,76 @@ async def test_no_contact_returns_info_error():
         error.code == "no_contact" and error.severity == "info"
         for error in errors
     )
+
+
+@pytest.mark.asyncio
+async def test_stale_hot_returns_critical_error():
+    errors = await detect_errors(
+        _deal(heat="hot", days_inactive=4),
+        tasks=None,
+        notes=None,
+    )
+
+    assert any(
+        error.code == "stale_hot" and error.severity == "critical"
+        for error in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_warm_returns_warning_error():
+    errors = await detect_errors(
+        _deal(heat="warm", days_inactive=8),
+        tasks=None,
+        notes=None,
+    )
+
+    assert any(
+        error.code == "stale_warm" and error.severity == "warning"
+        for error in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_stuck_initial_returns_warning_error():
+    errors = await detect_errors(
+        _deal(status_name="Новый", days_inactive=6),
+        tasks=None,
+        notes=None,
+    )
+
+    assert any(
+        error.code == "stuck_initial" and error.severity == "warning"
+        for error in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_unanswered_objection_returns_info_error():
+    with (
+        patch("hermes.rop_errors.get_llm_client", return_value=object()),
+        patch(
+            "hermes.rop_errors.call_skill",
+            new=AsyncMock(return_value={"client_objections": ["дорого"]}),
+        ),
+    ):
+        errors = await detect_errors(
+            _deal(),
+            tasks=None,
+            notes=[{"text": "Клиент говорит дорого, нужно подумать"}],
+        )
+
+    assert any(
+        error.code == "unanswered_objection" and error.severity == "info"
+        for error in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_none_tasks_and_notes_skips_those_checks():
+    """tasks=None and notes=None must not produce no_task or no_contact errors."""
+    errors = await detect_errors(_deal(), tasks=None, notes=None)
+
+    codes = {e.code for e in errors}
+    assert "no_task" not in codes
+    assert "no_contact" not in codes

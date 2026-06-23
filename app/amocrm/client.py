@@ -5,8 +5,10 @@ AmoCRM REST v4 клиент.
 from __future__ import annotations
 
 import logging
+from hashlib import sha1
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -35,6 +37,25 @@ class AmocrmClient:
             if resp.status_code == 204 or not resp.content:
                 return {}
             return resp.json()
+
+    async def _post(self, path: str, payload: Any) -> dict:
+        url = self._base + path
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(url, headers=self._headers(), json=payload)
+                resp.raise_for_status()
+                if resp.status_code == 204 or not resp.content:
+                    return {}
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (401, 403):
+                logger.error(
+                    "AmoCRM %d при POST %s — проверьте права AMOCRM_LONG_LIVED_TOKEN",
+                    exc.response.status_code,
+                    path,
+                )
+                await _notify_token_invalid(exc.response.status_code)
+            raise
 
     async def get_account(self) -> dict:
         return await self._get("/account")
@@ -152,6 +173,85 @@ class AmocrmClient:
                 return []
             raise
         return data.get("_embedded", {}).get("tasks", [])
+
+    async def create_task(
+        self,
+        lead_id: int,
+        text: str,
+        complete_till_ts: int,
+        responsible_user_id: int,
+        task_type_id: int = 1,
+    ) -> dict:
+        """
+        Создаёт задачу по сделке с защитой от дублей.
+
+        Если уже есть открытая задача с тем же текстом на тот же локальный день,
+        POST в AmoCRM не выполняется и возвращается существующая задача.
+        """
+        text = " ".join((text or "").split())
+        if not lead_id:
+            raise ValueError("lead_id is required")
+        if not text:
+            raise ValueError("text is required")
+        if not complete_till_ts:
+            raise ValueError("complete_till_ts is required")
+        if not responsible_user_id:
+            raise ValueError("responsible_user_id is required")
+
+        existing_tasks = await self.get_lead_tasks(lead_id)
+        duplicate = _find_duplicate_task(existing_tasks, text, complete_till_ts)
+        if duplicate:
+            return {"created": False, "duplicate": True, "task": duplicate}
+
+        request_id = _task_request_id(lead_id, text, complete_till_ts)
+        payload = [{
+            "task_type_id": int(task_type_id),
+            "text": text,
+            "complete_till": int(complete_till_ts),
+            "entity_id": int(lead_id),
+            "entity_type": "leads",
+            "responsible_user_id": int(responsible_user_id),
+            "request_id": request_id,
+        }]
+        data = await self._post("/tasks", payload)
+        created = (data.get("_embedded") or {}).get("tasks") or []
+        task = created[0] if created else data
+        return {"created": True, "duplicate": False, "task": task, "raw": data}
+
+
+def _task_request_id(lead_id: int, text: str, complete_till_ts: int) -> str:
+    digest = sha1(f"{lead_id}:{text}:{complete_till_ts}".encode("utf-8")).hexdigest()[:12]
+    return f"rop-{lead_id}-{digest}"
+
+
+def _normalise_task_text(text: Any) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _task_local_date(complete_till_ts: Any):
+    if not complete_till_ts:
+        return None
+    try:
+        ts = int(complete_till_ts)
+        if ts > 10_000_000_000:
+            ts //= 1000
+        tz = ZoneInfo(settings.timezone)
+        return datetime.fromtimestamp(ts, timezone.utc).astimezone(tz).date()
+    except Exception:
+        return None
+
+
+def _find_duplicate_task(tasks: list[dict], text: str, complete_till_ts: int) -> dict | None:
+    expected_text = _normalise_task_text(text)
+    expected_date = _task_local_date(complete_till_ts)
+    for task in tasks:
+        if task.get("is_completed"):
+            continue
+        if _normalise_task_text(task.get("text")) != expected_text:
+            continue
+        if _task_local_date(task.get("complete_till")) == expected_date:
+            return task
+    return None
 
 
 async def _notify_token_invalid(status_code: int) -> None:
