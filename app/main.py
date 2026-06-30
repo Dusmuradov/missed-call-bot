@@ -81,6 +81,62 @@ async def health() -> dict[str, str]:
 # AmoCRM OAuth (первичная авторизация — одноразово)
 # ---------------------------------------------------------------------------
 
+@app.get("/auth/callback", tags=["amocrm"])
+async def amocrm_oauth_callback(code: str) -> dict:
+    """
+    AmoCRM перенаправляет сюда после авторизации интеграции.
+    Обменивает code на access_token + refresh_token и сохраняет в БД.
+    AMO_REDIRECT_URI должен указывать на этот URL.
+    """
+    import httpx
+    from app.db import get_session
+    from app.repository import upsert_amocrm_token
+    from datetime import datetime, timedelta, timezone
+
+    if not settings.amocrm_client_id or not settings.amocrm_client_secret:
+        return {"error": "AMOCRM_CLIENT_ID или AMOCRM_CLIENT_SECRET не заданы"}
+
+    subdomain = settings.amocrm_subdomain
+    url = f"https://{subdomain}.amocrm.ru/oauth2/access_token"
+    payload = {
+        "client_id": settings.amocrm_client_id,
+        "client_secret": settings.amocrm_client_secret,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": settings.amocrm_redirect_uri,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.error("AmoCRM OAuth code exchange failed: %s", exc)
+        return {"error": str(exc)}
+
+    access_token = data.get("access_token")
+    refresh_token = data.get("refresh_token")
+    expires_in = data.get("expires_in", 1200)
+
+    if not access_token or not refresh_token:
+        return {"error": "Не получены токены от AmoCRM", "response": data}
+
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
+
+    async with get_session() as session:
+        await upsert_amocrm_token(
+            session,
+            subdomain=subdomain,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+        )
+
+    logger.info("AmoCRM OAuth: токены сохранены в БД, expires_at=%s", expires_at)
+    return {"ok": True, "expires_at": str(expires_at), "subdomain": subdomain}
+
+
 @app.get("/debug/config", tags=["meta"])
 async def debug_config() -> dict:
     """Показывает статус ключевых переменных (без значений) для диагностики Railway."""

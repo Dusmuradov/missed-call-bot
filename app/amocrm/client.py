@@ -1,12 +1,13 @@
 """
 AmoCRM REST v4 клиент.
-Авторизация только через AMOCRM_LONG_LIVED_TOKEN из .env / Railway Variables.
+Авторизация: OAuth refresh_token (БД) → AMOCRM_LONG_LIVED_TOKEN (fallback).
+Токен обновляется автоматически при истечении или 401.
 """
 from __future__ import annotations
 
 import logging
 from hashlib import sha1
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 from zoneinfo import ZoneInfo
 
@@ -17,7 +18,101 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _BASE = "https://{subdomain}.amocrm.ru/api/v4"
+_OAUTH_URL = "https://{subdomain}.amocrm.ru/oauth2/access_token"
 _PAGE_SIZE = 250
+# Обновляем токен за 2 минуты до истечения
+_REFRESH_BUFFER = timedelta(minutes=2)
+
+
+async def refresh_tokens() -> Optional[str]:
+    """
+    Обменивает refresh_token на новую пару access/refresh.
+    Сохраняет в БД и возвращает новый access_token.
+    Возвращает None если refresh_token не найден или обмен не удался.
+    """
+    if not settings.amocrm_client_id or not settings.amocrm_client_secret:
+        logger.warning("AMO OAuth не настроен: AMOCRM_CLIENT_ID/SECRET не заданы")
+        return None
+
+    from app.db import get_session
+    from app.repository import get_amocrm_token, upsert_amocrm_token
+
+    async with get_session() as session:
+        token_row = await get_amocrm_token(session)
+
+    if token_row is None or not token_row.refresh_token:
+        logger.warning("AmoCRM refresh_token не найден в БД")
+        return None
+
+    subdomain = token_row.subdomain or settings.amocrm_subdomain
+    url = _OAUTH_URL.format(subdomain=subdomain)
+    payload = {
+        "client_id": settings.amocrm_client_id,
+        "client_secret": settings.amocrm_client_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": token_row.refresh_token,
+        "redirect_uri": settings.amocrm_redirect_uri,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.error("AmoCRM token refresh failed: %s", exc)
+        return None
+
+    access_token = data.get("access_token")
+    new_refresh = data.get("refresh_token")
+    expires_in = data.get("expires_in", 1200)  # 20 минут по умолчанию
+
+    if not access_token:
+        logger.error("AmoCRM refresh response missing access_token: %s", data)
+        return None
+
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
+
+    async with get_session() as session:
+        await upsert_amocrm_token(
+            session,
+            subdomain=subdomain,
+            access_token=access_token,
+            refresh_token=new_refresh or token_row.refresh_token,
+            expires_at=expires_at,
+        )
+
+    logger.info("AmoCRM token refreshed, expires_at=%s", expires_at)
+    return access_token
+
+
+async def _get_current_token() -> Optional[str]:
+    """
+    Возвращает действующий access_token.
+    Приоритет: БД → auto-refresh → long_lived_token.
+    """
+    from app.db import get_session
+    from app.repository import get_amocrm_token
+
+    async with get_session() as session:
+        token_row = await get_amocrm_token(session)
+
+    if token_row and token_row.access_token:
+        # Если токен скоро истечёт — обновляем сейчас
+        if token_row.expires_at:
+            expires_utc = token_row.expires_at.replace(tzinfo=timezone.utc) if token_row.expires_at.tzinfo is None else token_row.expires_at
+            if datetime.now(timezone.utc) >= expires_utc - _REFRESH_BUFFER:
+                logger.info("AmoCRM access_token истекает, обновляем...")
+                refreshed = await refresh_tokens()
+                if refreshed:
+                    return refreshed
+        else:
+            return token_row.access_token
+
+        return token_row.access_token
+
+    # Fallback: статичный long-lived токен
+    return settings.amocrm_long_lived_token or None
 
 
 class AmocrmClient:
@@ -29,10 +124,20 @@ class AmocrmClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
+    async def _refresh_and_retry(self) -> bool:
+        """Обновляет токен и возвращает True если успешно."""
+        new_token = await refresh_tokens()
+        if new_token:
+            self._token = new_token
+            return True
+        return False
+
     async def _get(self, path: str, params: dict | None = None) -> dict:
         url = self._base + path
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(url, headers=self._headers(), params=params or {})
+            if resp.status_code == 401 and await self._refresh_and_retry():
+                resp = await client.get(url, headers=self._headers(), params=params or {})
             resp.raise_for_status()
             if resp.status_code == 204 or not resp.content:
                 return {}
@@ -43,6 +148,8 @@ class AmocrmClient:
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(url, headers=self._headers(), json=payload)
+                if resp.status_code == 401 and await self._refresh_and_retry():
+                    resp = await client.post(url, headers=self._headers(), json=payload)
                 resp.raise_for_status()
                 if resp.status_code == 204 or not resp.content:
                     return {}
@@ -50,7 +157,7 @@ class AmocrmClient:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in (401, 403):
                 logger.error(
-                    "AmoCRM %d при POST %s — проверьте права AMOCRM_LONG_LIVED_TOKEN",
+                    "AmoCRM %d при POST %s — токен недействителен даже после refresh",
                     exc.response.status_code,
                     path,
                 )
@@ -269,8 +376,10 @@ async def _notify_token_invalid(status_code: int) -> None:
 
 
 async def get_valid_client() -> Optional[AmocrmClient]:
-    """Возвращает AmocrmClient с long-lived токеном или None если токен не задан."""
-    if not settings.amocrm_long_lived_token:
-        logger.warning("AMOCRM_LONG_LIVED_TOKEN не задан — AmoCRM недоступен")
+    """Возвращает AmocrmClient с актуальным токеном (БД → refresh → long_lived)."""
+    token = await _get_current_token()
+    if not token:
+        logger.warning("AmoCRM токен не найден — проверьте AMOCRM_LONG_LIVED_TOKEN или OAuth")
         return None
-    return AmocrmClient(settings.amocrm_subdomain, settings.amocrm_long_lived_token)
+    subdomain = settings.amocrm_subdomain
+    return AmocrmClient(subdomain, token)

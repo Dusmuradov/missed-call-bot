@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 _scheduler: Optional[AsyncIOScheduler] = None
 
 
+async def amocrm_token_refresh_job() -> None:
+    """Обновляет AmoCRM access_token каждые 15 минут (буфер для 20-минутного токена)."""
+    from app.amocrm.client import refresh_tokens
+    result = await refresh_tokens()
+    if result:
+        logger.info("AmoCRM token auto-refreshed successfully.")
+    else:
+        logger.debug("AmoCRM token refresh skipped (нет refresh_token в БД или OAuth не настроен).")
+
+
 async def check_callback_escalations() -> None:
     """
     Находит пропущенные звонки, по которым не перезвонили за N минут,
@@ -404,6 +414,18 @@ def create_scheduler() -> AsyncIOScheduler:
     """Создаёт и настраивает планировщик."""
     global _scheduler
     _scheduler = AsyncIOScheduler(timezone="UTC")
+
+    # Обновление AmoCRM токена каждые 15 минут
+    if settings.amocrm_client_id and settings.amocrm_client_secret:
+        _scheduler.add_job(
+            amocrm_token_refresh_job,
+            trigger="interval",
+            minutes=15,
+            id="amocrm_token_refresh",
+            name="AmoCRM OAuth token auto-refresh",
+            replace_existing=True,
+        )
+        logger.info("AmoCRM token auto-refresh scheduled every 15 min.")
 
     # Проверка перезвонов каждые N минут
     _scheduler.add_job(
